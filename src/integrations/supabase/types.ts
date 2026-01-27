@@ -1391,6 +1391,30 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      ban_user_permanently: {
+        Args: { target_user_id: string }
+        Returns: boolean
+      }
+      check_rate_limit: {
+        Args: { max_count: number; rate_key: string; window_ms: number }
+        Returns: boolean
+      }
+      get_app_stats: { Args: never; Returns: Json }
+      get_user_rewards_v2: {
+        Args: { limit_count?: number }
+        Returns: {
+          admin_notes: string
+          avatar_url: string
+          claimable: number
+          created_at: string
+          full_name: string
+          id: string
+          is_banned: boolean
+          is_restricted: boolean
+          status: string
+          username: string
+        }[]
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
@@ -1402,6 +1426,11 @@ export type Database = {
         Args: { _conversation_id: string; _user_id: string }
         Returns: boolean
       }
+      recalculate_user_financial: {
+        Args: { target_user_id: string }
+        Returns: undefined
+      }
+      run_financial_reconciliation: { Args: never; Returns: Json }
     }
     Enums: {
       app_role: "admin" | "user"
