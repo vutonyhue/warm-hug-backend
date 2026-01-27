@@ -22,18 +22,9 @@ export const UnifiedAuthForm = () => {
     setIsSettingUp(true);
 
     try {
-      // Step 1: Update law_of_light_accepted if pending
-      const lawOfLightPending = localStorage.getItem('law_of_light_accepted_pending');
-      if (lawOfLightPending === 'true') {
-        console.log('[Setup] Updating law_of_light_accepted for user:', userId);
-        await supabase.from('profiles').update({
-          law_of_light_accepted: true,
-          law_of_light_accepted_at: new Date().toISOString()
-        }).eq('id', userId);
-        localStorage.removeItem('law_of_light_accepted_pending');
-      }
+      // law_of_light đã được xử lý trong handleAuthSuccess
 
-      // Step 2: Create custodial wallet (only if NOT using external wallet)
+      // Create custodial wallet (only if NOT using external wallet)
       if (!hasExternalWallet) {
         setSetupStep('wallet');
         console.log('[Setup] Creating custodial wallet for user:', userId);
@@ -80,6 +71,17 @@ export const UnifiedAuthForm = () => {
     }
 
     console.log('[Auth] Session verified for user:', userId, 'isNewUser:', isNewUser, 'hasExternalWallet:', hasExternalWallet);
+
+    // QUAN TRỌNG: Luôn kiểm tra và cập nhật law_of_light nếu có pending (cho TẤT CẢ users)
+    const lawOfLightPending = localStorage.getItem('law_of_light_accepted_pending');
+    if (lawOfLightPending === 'true') {
+      console.log('[Auth] Updating law_of_light_accepted for user:', userId);
+      await supabase.from('profiles').update({
+        law_of_light_accepted: true,
+        law_of_light_accepted_at: new Date().toISOString()
+      }).eq('id', userId);
+      localStorage.removeItem('law_of_light_accepted_pending');
+    }
 
     if (isNewUser) {
       await handleNewUserSetup(userId, hasExternalWallet);

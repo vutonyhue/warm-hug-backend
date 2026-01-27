@@ -963,6 +963,7 @@ export type Database = {
           is_restricted: boolean | null
           last_login_at: string | null
           law_of_light_accepted: boolean | null
+          law_of_light_accepted_at: string | null
           oauth_provider: string | null
           pending_reward: number | null
           pinned_post_id: string | null
@@ -996,6 +997,7 @@ export type Database = {
           is_restricted?: boolean | null
           last_login_at?: string | null
           law_of_light_accepted?: boolean | null
+          law_of_light_accepted_at?: string | null
           oauth_provider?: string | null
           pending_reward?: number | null
           pinned_post_id?: string | null
@@ -1029,6 +1031,7 @@ export type Database = {
           is_restricted?: boolean | null
           last_login_at?: string | null
           law_of_light_accepted?: boolean | null
+          law_of_light_accepted_at?: string | null
           oauth_provider?: string | null
           pending_reward?: number | null
           pinned_post_id?: string | null

@@ -10,9 +10,10 @@ interface ClaimData {
   id: string;
   user_id: string;
   amount: number;
-  wallet_address: string;
+  tx_hash: string | null;
   created_at: string;
   username?: string;
+  wallet_address?: string;
 }
 
 interface BlockchainTabProps {
@@ -32,26 +33,30 @@ const BlockchainTab = ({ adminId }: BlockchainTabProps) => {
     try {
       const { data: claimsData, error } = await supabase
         .from('reward_claims')
-        .select('id, user_id, amount, wallet_address, created_at')
+        .select('id, user_id, amount, tx_hash, created_at')
         .order('created_at', { ascending: false })
         .limit(100);
 
       if (error) throw error;
 
       if (claimsData && claimsData.length > 0) {
-        // Get usernames
+        // Get usernames and wallet addresses
         const userIds = [...new Set(claimsData.map(c => c.user_id))];
         const { data: profiles } = await supabase
           .from('profiles')
-          .select('id, username')
+          .select('id, username, custodial_wallet_address, external_wallet_address')
           .in('id', userIds);
 
-        const usernameMap = new Map(profiles?.map(p => [p.id, p.username]) || []);
+        const profileMap = new Map(profiles?.map(p => [p.id, p]) || []);
         
-        setClaims(claimsData.map(claim => ({
-          ...claim,
-          username: usernameMap.get(claim.user_id) || 'Unknown'
-        })));
+        setClaims(claimsData.map(claim => {
+          const profile = profileMap.get(claim.user_id);
+          return {
+            ...claim,
+            username: profile?.username || 'Unknown',
+            wallet_address: profile?.external_wallet_address || profile?.custodial_wallet_address || ''
+          };
+        }));
       }
     } catch (error) {
       console.error("Error loading claims:", error);
@@ -74,7 +79,7 @@ const BlockchainTab = ({ adminId }: BlockchainTabProps) => {
 
   // Calculate stats
   const totalClaimed = claims.reduce((sum, c) => sum + c.amount, 0);
-  const uniqueWallets = new Set(claims.map(c => c.wallet_address.toLowerCase())).size;
+  const uniqueWallets = new Set(claims.filter(c => c.wallet_address).map(c => c.wallet_address!.toLowerCase())).size;
   const uniqueUsers = new Set(claims.map(c => c.user_id)).size;
 
   if (loading) {
@@ -164,7 +169,7 @@ const BlockchainTab = ({ adminId }: BlockchainTabProps) => {
                       </td>
                       <td className="py-3 px-2">
                         <code className="text-xs bg-muted px-2 py-1 rounded">
-                          {truncateAddress(claim.wallet_address)}
+                          {claim.wallet_address ? truncateAddress(claim.wallet_address) : 'N/A'}
                         </code>
                       </td>
                       <td className="py-3 px-2 text-right">
@@ -183,6 +188,7 @@ const BlockchainTab = ({ adminId }: BlockchainTabProps) => {
                           asChild
                           className="gap-1"
                         >
+                        {claim.wallet_address ? (
                           <a 
                             href={`https://bscscan.com/address/${claim.wallet_address}`}
                             target="_blank"
@@ -191,6 +197,9 @@ const BlockchainTab = ({ adminId }: BlockchainTabProps) => {
                             <ExternalLink className="w-3 h-3" />
                             BscScan
                           </a>
+                        ) : (
+                          <span className="text-muted-foreground">-</span>
+                        )}
                         </Button>
                       </td>
                     </tr>

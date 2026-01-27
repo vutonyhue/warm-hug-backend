@@ -6,12 +6,13 @@ import { Json } from '@/integrations/supabase/types';
 export interface Message {
   id: string;
   conversation_id: string;
-  sender_id: string;
+  sender_id: string | null;
   content: string | null;
-  media_urls: Json | null;
+  media_type: string | null;
+  media_url: string | null;
   reply_to_id: string | null;
   is_deleted: boolean | null;
-  deleted_at: string | null;
+  is_edited: boolean | null;
   created_at: string | null;
   updated_at: string | null;
   sender?: {
@@ -214,7 +215,8 @@ export function useMessages(conversationId: string | null, userId: string | null
           conversation_id: conversationId,
           sender_id: userId,
           content: content?.trim() || null,
-          media_urls: mediaUrls || [],
+          media_url: mediaUrls?.[0] || null,
+          media_type: mediaUrls?.[0] ? 'image' : null,
           reply_to_id: replyToId || null,
         })
         .select()

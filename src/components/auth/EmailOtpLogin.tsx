@@ -89,12 +89,6 @@ export const EmailOtpLogin = ({ onSuccess }: EmailOtpLoginProps) => {
           throw new Error('Session not established');
         }
 
-        // Update last_login_platform to 'FUN Profile'
-        await supabase
-          .from('profiles')
-          .update({ last_login_platform: 'FUN Profile' })
-          .eq('id', data.user_id);
-
         console.log('[OTP] Session established for user:', data.user_id);
         toast.success(t('welcomeBack'));
         onSuccess(data.user_id, data.is_new_user);

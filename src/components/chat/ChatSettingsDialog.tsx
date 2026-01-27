@@ -92,8 +92,8 @@ export function ChatSettingsDialog({
             </div>
             <Switch
               id="read-receipts"
-              checked={settings?.show_read_receipts ?? true}
-              onCheckedChange={(checked) => handleUpdate({ show_read_receipts: checked })}
+              checked={settings?.read_receipts ?? true}
+              onCheckedChange={(checked) => handleUpdate({ read_receipts: checked })}
               disabled={isLoading || updateSettings.isPending}
             />
           </div>
@@ -113,8 +113,8 @@ export function ChatSettingsDialog({
             </div>
             <Switch
               id="typing-indicator"
-              checked={settings?.show_typing_indicator ?? true}
-              onCheckedChange={(checked) => handleUpdate({ show_typing_indicator: checked })}
+              checked={settings?.typing_indicators ?? true}
+              onCheckedChange={(checked) => handleUpdate({ typing_indicators: checked })}
               disabled={isLoading || updateSettings.isPending}
             />
           </div>

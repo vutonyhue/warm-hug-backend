@@ -84,9 +84,7 @@ const UserReviewTab = ({ users, adminId, onRefresh }: UserReviewTabProps) => {
     setLoading(user.id);
     try {
       const { error } = await supabase.rpc('ban_user_permanently', {
-        p_admin_id: adminId,
-        p_user_id: user.id,
-        p_reason: 'Tài khoản nghi ngờ lạm dụng hệ thống'
+        target_user_id: user.id
       });
 
       if (error) throw error;

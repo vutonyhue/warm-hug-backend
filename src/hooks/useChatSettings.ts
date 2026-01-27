@@ -5,16 +5,18 @@ export interface ChatSettings {
   id: string;
   user_id: string;
   who_can_message: string | null;
-  show_read_receipts: boolean | null;
-  show_typing_indicator: boolean | null;
+  read_receipts: boolean | null;
+  typing_indicators: boolean | null;
+  notification_sound: boolean | null;
   created_at: string | null;
   updated_at: string | null;
 }
 
 const DEFAULT_SETTINGS: Omit<ChatSettings, 'id' | 'user_id' | 'created_at' | 'updated_at'> = {
   who_can_message: 'friends',
-  show_read_receipts: true,
-  show_typing_indicator: true,
+  read_receipts: true,
+  typing_indicators: true,
+  notification_sound: true,
 };
 
 export function useChatSettings(userId: string | null) {
@@ -101,7 +103,7 @@ export async function canSendMessage(senderId: string, receiverId: string): Prom
       const { data: friendship } = await supabase
         .from('friendships')
         .select('id')
-        .or(`and(user_id.eq.${senderId},friend_id.eq.${receiverId}),and(user_id.eq.${receiverId},friend_id.eq.${senderId})`)
+        .or(`and(requester_id.eq.${senderId},addressee_id.eq.${receiverId}),and(requester_id.eq.${receiverId},addressee_id.eq.${senderId})`)
         .eq('status', 'accepted')
         .limit(1);
 

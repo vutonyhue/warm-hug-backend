@@ -39,7 +39,7 @@ export const MessageBubble = memo(function MessageBubble({
 }: MessageBubbleProps) {
   const [showActions, setShowActions] = useState(false);
 
-  const mediaUrls = Array.isArray(message.media_urls) ? message.media_urls as string[] : [];
+  const mediaUrls = message.media_url ? [message.media_url] : [];
   
   // Group reactions by emoji
   const reactionCounts = message.reactions?.reduce((acc, r) => {

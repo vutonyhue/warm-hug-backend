@@ -37,14 +37,14 @@ export function NewConversationDialog({
 
       const { data: friendships, error } = await supabase
         .from('friendships')
-        .select('user_id, friend_id')
-        .or(`user_id.eq.${currentUserId},friend_id.eq.${currentUserId}`)
+        .select('requester_id, addressee_id')
+        .or(`requester_id.eq.${currentUserId},addressee_id.eq.${currentUserId}`)
         .eq('status', 'accepted');
 
       if (error) throw error;
 
       const friendIds = friendships?.map((f) =>
-        f.user_id === currentUserId ? f.friend_id : f.user_id
+        f.requester_id === currentUserId ? f.addressee_id : f.requester_id
       ) || [];
 
       if (friendIds.length === 0) return [];

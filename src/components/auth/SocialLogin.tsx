@@ -25,15 +25,9 @@ export const SocialLogin = ({
       if (event === 'SIGNED_IN' && session?.user) {
         const provider = session.user.app_metadata?.provider;
         if (provider && provider !== 'email') {
-          // Defer the database update and callback to avoid auth deadlock
+          // Defer the callback to avoid auth deadlock
           setTimeout(async () => {
             try {
-              // Update last_login_platform to 'FUN Profile'
-              await supabase.from('profiles').update({
-                last_login_platform: 'FUN Profile'
-              }).eq('id', session.user.id);
-              console.log('[SocialLogin] Updated last_login_platform to: FUN Profile');
-
               // Check if user is new (created within last minute)
               const {
                 data: profile
