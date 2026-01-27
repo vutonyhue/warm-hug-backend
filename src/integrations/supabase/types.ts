@@ -14,6 +14,132 @@ export type Database = {
   }
   public: {
     Tables: {
+      account_merge_requests: {
+        Row: {
+          admin_id: string | null
+          admin_notes: string | null
+          created_at: string | null
+          id: string
+          source_user_id: string
+          status: string | null
+          target_user_id: string
+          updated_at: string | null
+        }
+        Insert: {
+          admin_id?: string | null
+          admin_notes?: string | null
+          created_at?: string | null
+          id?: string
+          source_user_id: string
+          status?: string | null
+          target_user_id: string
+          updated_at?: string | null
+        }
+        Update: {
+          admin_id?: string | null
+          admin_notes?: string | null
+          created_at?: string | null
+          id?: string
+          source_user_id?: string
+          status?: string | null
+          target_user_id?: string
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
+      audit_logs: {
+        Row: {
+          action: string
+          admin_id: string | null
+          created_at: string | null
+          id: string
+          ip_address: string | null
+          new_data: Json | null
+          old_data: Json | null
+          target_id: string | null
+          target_type: string | null
+        }
+        Insert: {
+          action: string
+          admin_id?: string | null
+          created_at?: string | null
+          id?: string
+          ip_address?: string | null
+          new_data?: Json | null
+          old_data?: Json | null
+          target_id?: string | null
+          target_type?: string | null
+        }
+        Update: {
+          action?: string
+          admin_id?: string | null
+          created_at?: string | null
+          id?: string
+          ip_address?: string | null
+          new_data?: Json | null
+          old_data?: Json | null
+          target_id?: string | null
+          target_type?: string | null
+        }
+        Relationships: []
+      }
+      blacklisted_wallets: {
+        Row: {
+          added_by: string | null
+          created_at: string | null
+          id: string
+          reason: string | null
+          wallet_address: string
+        }
+        Insert: {
+          added_by?: string | null
+          created_at?: string | null
+          id?: string
+          reason?: string | null
+          wallet_address: string
+        }
+        Update: {
+          added_by?: string | null
+          created_at?: string | null
+          id?: string
+          reason?: string | null
+          wallet_address?: string
+        }
+        Relationships: []
+      }
+      chat_settings: {
+        Row: {
+          created_at: string | null
+          id: string
+          notification_sound: boolean | null
+          read_receipts: boolean | null
+          typing_indicators: boolean | null
+          updated_at: string | null
+          user_id: string
+          who_can_message: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          notification_sound?: boolean | null
+          read_receipts?: boolean | null
+          typing_indicators?: boolean | null
+          updated_at?: string | null
+          user_id: string
+          who_can_message?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          notification_sound?: boolean | null
+          read_receipts?: boolean | null
+          typing_indicators?: boolean | null
+          updated_at?: string | null
+          user_id?: string
+          who_can_message?: string | null
+        }
+        Relationships: []
+      }
       comments: {
         Row: {
           content: string
@@ -65,6 +191,198 @@ export type Database = {
           },
         ]
       }
+      conversation_participants: {
+        Row: {
+          conversation_id: string
+          id: string
+          joined_at: string | null
+          left_at: string | null
+          muted_until: string | null
+          nickname: string | null
+          role: string | null
+          user_id: string
+        }
+        Insert: {
+          conversation_id: string
+          id?: string
+          joined_at?: string | null
+          left_at?: string | null
+          muted_until?: string | null
+          nickname?: string | null
+          role?: string | null
+          user_id: string
+        }
+        Update: {
+          conversation_id?: string
+          id?: string
+          joined_at?: string | null
+          left_at?: string | null
+          muted_until?: string | null
+          nickname?: string | null
+          role?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "conversation_participants_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      conversations: {
+        Row: {
+          avatar_url: string | null
+          created_at: string | null
+          created_by: string | null
+          id: string
+          last_message_at: string | null
+          last_message_preview: string | null
+          name: string | null
+          type: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          avatar_url?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          last_message_at?: string | null
+          last_message_preview?: string | null
+          name?: string | null
+          type?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          avatar_url?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          last_message_at?: string | null
+          last_message_preview?: string | null
+          name?: string | null
+          type?: string | null
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
+      cross_platform_tokens: {
+        Row: {
+          access_token: string
+          client_id: string
+          created_at: string | null
+          expires_at: string
+          id: string
+          refresh_expires_at: string
+          refresh_token: string
+          revoked: boolean | null
+          scope: string | null
+          user_id: string
+        }
+        Insert: {
+          access_token: string
+          client_id: string
+          created_at?: string | null
+          expires_at: string
+          id?: string
+          refresh_expires_at: string
+          refresh_token: string
+          revoked?: boolean | null
+          scope?: string | null
+          user_id: string
+        }
+        Update: {
+          access_token?: string
+          client_id?: string
+          created_at?: string | null
+          expires_at?: string
+          id?: string
+          refresh_expires_at?: string
+          refresh_token?: string
+          revoked?: boolean | null
+          scope?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cross_platform_tokens_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "oauth_clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      custodial_wallets: {
+        Row: {
+          address: string
+          created_at: string | null
+          encrypted_private_key: string
+          id: string
+          user_id: string
+        }
+        Insert: {
+          address: string
+          created_at?: string | null
+          encrypted_private_key: string
+          id?: string
+          user_id: string
+        }
+        Update: {
+          address?: string
+          created_at?: string | null
+          encrypted_private_key?: string
+          id?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      financial_transactions: {
+        Row: {
+          amount: number
+          balance_after: number | null
+          balance_before: number | null
+          client_id: string
+          created_at: string | null
+          id: string
+          metadata: Json | null
+          type: string
+          user_id: string
+        }
+        Insert: {
+          amount: number
+          balance_after?: number | null
+          balance_before?: number | null
+          client_id: string
+          created_at?: string | null
+          id?: string
+          metadata?: Json | null
+          type: string
+          user_id: string
+        }
+        Update: {
+          amount?: number
+          balance_after?: number | null
+          balance_before?: number | null
+          client_id?: string
+          created_at?: string | null
+          id?: string
+          metadata?: Json | null
+          type?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "financial_transactions_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "oauth_clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       friendships: {
         Row: {
           addressee_id: string
@@ -91,6 +409,169 @@ export type Database = {
           updated_at?: string | null
         }
         Relationships: []
+      }
+      livestreams: {
+        Row: {
+          created_at: string | null
+          description: string | null
+          ended_at: string | null
+          id: string
+          playback_url: string | null
+          started_at: string | null
+          status: string | null
+          stream_key: string | null
+          thumbnail_url: string | null
+          title: string | null
+          user_id: string
+          viewer_count: number | null
+        }
+        Insert: {
+          created_at?: string | null
+          description?: string | null
+          ended_at?: string | null
+          id?: string
+          playback_url?: string | null
+          started_at?: string | null
+          status?: string | null
+          stream_key?: string | null
+          thumbnail_url?: string | null
+          title?: string | null
+          user_id: string
+          viewer_count?: number | null
+        }
+        Update: {
+          created_at?: string | null
+          description?: string | null
+          ended_at?: string | null
+          id?: string
+          playback_url?: string | null
+          started_at?: string | null
+          status?: string | null
+          stream_key?: string | null
+          thumbnail_url?: string | null
+          title?: string | null
+          user_id?: string
+          viewer_count?: number | null
+        }
+        Relationships: []
+      }
+      message_reactions: {
+        Row: {
+          created_at: string | null
+          emoji: string
+          id: string
+          message_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          emoji: string
+          id?: string
+          message_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          emoji?: string
+          id?: string
+          message_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "message_reactions_message_id_fkey"
+            columns: ["message_id"]
+            isOneToOne: false
+            referencedRelation: "messages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      message_reads: {
+        Row: {
+          id: string
+          message_id: string
+          read_at: string | null
+          user_id: string
+        }
+        Insert: {
+          id?: string
+          message_id: string
+          read_at?: string | null
+          user_id: string
+        }
+        Update: {
+          id?: string
+          message_id?: string
+          read_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "message_reads_message_id_fkey"
+            columns: ["message_id"]
+            isOneToOne: false
+            referencedRelation: "messages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      messages: {
+        Row: {
+          content: string | null
+          conversation_id: string
+          created_at: string | null
+          id: string
+          is_deleted: boolean | null
+          is_edited: boolean | null
+          media_type: string | null
+          media_url: string | null
+          reply_to_id: string | null
+          sender_id: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          content?: string | null
+          conversation_id: string
+          created_at?: string | null
+          id?: string
+          is_deleted?: boolean | null
+          is_edited?: boolean | null
+          media_type?: string | null
+          media_url?: string | null
+          reply_to_id?: string | null
+          sender_id?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          content?: string | null
+          conversation_id?: string
+          created_at?: string | null
+          id?: string
+          is_deleted?: boolean | null
+          is_edited?: boolean | null
+          media_type?: string | null
+          media_url?: string | null
+          reply_to_id?: string | null
+          sender_id?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "messages_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "messages_reply_to_id_fkey"
+            columns: ["reply_to_id"]
+            isOneToOne: false
+            referencedRelation: "messages"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       notifications: {
         Row: {
@@ -145,6 +626,236 @@ export type Database = {
             columns: ["post_id"]
             isOneToOne: false
             referencedRelation: "posts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      oauth_clients: {
+        Row: {
+          allowed_scopes: string[] | null
+          created_at: string | null
+          id: string
+          is_active: boolean | null
+          name: string
+          redirect_uris: string[]
+          secret: string
+        }
+        Insert: {
+          allowed_scopes?: string[] | null
+          created_at?: string | null
+          id: string
+          is_active?: boolean | null
+          name: string
+          redirect_uris: string[]
+          secret: string
+        }
+        Update: {
+          allowed_scopes?: string[] | null
+          created_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          name?: string
+          redirect_uris?: string[]
+          secret?: string
+        }
+        Relationships: []
+      }
+      oauth_codes: {
+        Row: {
+          client_id: string
+          code: string
+          code_challenge: string | null
+          code_challenge_method: string | null
+          created_at: string | null
+          expires_at: string
+          id: string
+          redirect_uri: string
+          scope: string | null
+          used: boolean | null
+          user_id: string
+        }
+        Insert: {
+          client_id: string
+          code: string
+          code_challenge?: string | null
+          code_challenge_method?: string | null
+          created_at?: string | null
+          expires_at: string
+          id?: string
+          redirect_uri: string
+          scope?: string | null
+          used?: boolean | null
+          user_id: string
+        }
+        Update: {
+          client_id?: string
+          code?: string
+          code_challenge?: string | null
+          code_challenge_method?: string | null
+          created_at?: string | null
+          expires_at?: string
+          id?: string
+          redirect_uri?: string
+          scope?: string | null
+          used?: boolean | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "oauth_codes_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "oauth_clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      otp_codes: {
+        Row: {
+          code: string
+          created_at: string | null
+          email: string
+          expires_at: string
+          id: string
+          used: boolean | null
+        }
+        Insert: {
+          code: string
+          created_at?: string | null
+          email: string
+          expires_at: string
+          id?: string
+          used?: boolean | null
+        }
+        Update: {
+          code?: string
+          created_at?: string | null
+          email?: string
+          expires_at?: string
+          id?: string
+          used?: boolean | null
+        }
+        Relationships: []
+      }
+      pending_provisions: {
+        Row: {
+          client_id: string
+          created_at: string | null
+          email: string
+          expires_at: string
+          id: string
+          token: string
+          used: boolean | null
+        }
+        Insert: {
+          client_id: string
+          created_at?: string | null
+          email: string
+          expires_at: string
+          id?: string
+          token: string
+          used?: boolean | null
+        }
+        Update: {
+          client_id?: string
+          created_at?: string | null
+          email?: string
+          expires_at?: string
+          id?: string
+          token?: string
+          used?: boolean | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pending_provisions_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "oauth_clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      platform_financial_data: {
+        Row: {
+          client_id: string
+          created_at: string | null
+          id: string
+          synced_at: string | null
+          total_bet: number | null
+          total_deposit: number | null
+          total_loss: number | null
+          total_profit: number | null
+          total_win: number | null
+          total_withdraw: number | null
+          user_id: string
+        }
+        Insert: {
+          client_id: string
+          created_at?: string | null
+          id?: string
+          synced_at?: string | null
+          total_bet?: number | null
+          total_deposit?: number | null
+          total_loss?: number | null
+          total_profit?: number | null
+          total_win?: number | null
+          total_withdraw?: number | null
+          user_id: string
+        }
+        Update: {
+          client_id?: string
+          created_at?: string | null
+          id?: string
+          synced_at?: string | null
+          total_bet?: number | null
+          total_deposit?: number | null
+          total_loss?: number | null
+          total_profit?: number | null
+          total_win?: number | null
+          total_withdraw?: number | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "platform_financial_data_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "oauth_clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      platform_user_data: {
+        Row: {
+          client_id: string
+          created_at: string | null
+          data: Json | null
+          id: string
+          synced_at: string | null
+          user_id: string
+        }
+        Insert: {
+          client_id: string
+          created_at?: string | null
+          data?: Json | null
+          id?: string
+          synced_at?: string | null
+          user_id: string
+        }
+        Update: {
+          client_id?: string
+          created_at?: string | null
+          data?: Json | null
+          id?: string
+          synced_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "platform_user_data_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "oauth_clients"
             referencedColumns: ["id"]
           },
         ]
@@ -339,6 +1050,30 @@ export type Database = {
           },
         ]
       }
+      rate_limit_state: {
+        Row: {
+          count: number | null
+          created_at: string | null
+          id: string
+          key: string
+          window_start: string | null
+        }
+        Insert: {
+          count?: number | null
+          created_at?: string | null
+          id?: string
+          key: string
+          window_start?: string | null
+        }
+        Update: {
+          count?: number | null
+          created_at?: string | null
+          id?: string
+          key?: string
+          window_start?: string | null
+        }
+        Relationships: []
+      }
       reactions: {
         Row: {
           created_at: string | null
@@ -370,6 +1105,164 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      reconciliation_logs: {
+        Row: {
+          client_id: string | null
+          created_at: string | null
+          discrepancy: Json | null
+          id: string
+          resolved_at: string | null
+          status: string
+          type: string
+          user_id: string | null
+        }
+        Insert: {
+          client_id?: string | null
+          created_at?: string | null
+          discrepancy?: Json | null
+          id?: string
+          resolved_at?: string | null
+          status: string
+          type: string
+          user_id?: string | null
+        }
+        Update: {
+          client_id?: string | null
+          created_at?: string | null
+          discrepancy?: Json | null
+          id?: string
+          resolved_at?: string | null
+          status?: string
+          type?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "reconciliation_logs_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "oauth_clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      reward_adjustments: {
+        Row: {
+          admin_id: string | null
+          amount: number
+          created_at: string | null
+          id: string
+          reason: string | null
+          type: string
+          user_id: string
+        }
+        Insert: {
+          admin_id?: string | null
+          amount: number
+          created_at?: string | null
+          id?: string
+          reason?: string | null
+          type: string
+          user_id: string
+        }
+        Update: {
+          admin_id?: string | null
+          amount?: number
+          created_at?: string | null
+          id?: string
+          reason?: string | null
+          type?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      reward_approvals: {
+        Row: {
+          action: string
+          admin_id: string | null
+          created_at: string | null
+          id: string
+          new_amount: number | null
+          notes: string | null
+          previous_amount: number | null
+          user_id: string
+        }
+        Insert: {
+          action: string
+          admin_id?: string | null
+          created_at?: string | null
+          id?: string
+          new_amount?: number | null
+          notes?: string | null
+          previous_amount?: number | null
+          user_id: string
+        }
+        Update: {
+          action?: string
+          admin_id?: string | null
+          created_at?: string | null
+          id?: string
+          new_amount?: number | null
+          notes?: string | null
+          previous_amount?: number | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      reward_claims: {
+        Row: {
+          amount: number
+          claimed_at: string | null
+          created_at: string | null
+          id: string
+          status: string | null
+          tx_hash: string | null
+          user_id: string
+        }
+        Insert: {
+          amount: number
+          claimed_at?: string | null
+          created_at?: string | null
+          id?: string
+          status?: string | null
+          tx_hash?: string | null
+          user_id: string
+        }
+        Update: {
+          amount?: number
+          claimed_at?: string | null
+          created_at?: string | null
+          id?: string
+          status?: string | null
+          tx_hash?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      search_logs: {
+        Row: {
+          created_at: string | null
+          id: string
+          ip_address: string | null
+          query: string | null
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          ip_address?: string | null
+          query?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          ip_address?: string | null
+          query?: string | null
+          user_id?: string | null
+        }
+        Relationships: []
       }
       shared_posts: {
         Row: {
@@ -405,6 +1298,72 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      soul_nfts: {
+        Row: {
+          contract_address: string | null
+          created_at: string | null
+          id: string
+          metadata: Json | null
+          minted_at: string | null
+          token_id: string | null
+          user_id: string
+        }
+        Insert: {
+          contract_address?: string | null
+          created_at?: string | null
+          id?: string
+          metadata?: Json | null
+          minted_at?: string | null
+          token_id?: string | null
+          user_id: string
+        }
+        Update: {
+          contract_address?: string | null
+          created_at?: string | null
+          id?: string
+          metadata?: Json | null
+          minted_at?: string | null
+          token_id?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      transactions: {
+        Row: {
+          amount: number
+          created_at: string | null
+          id: string
+          metadata: Json | null
+          status: string | null
+          token_symbol: string | null
+          tx_hash: string | null
+          type: string
+          user_id: string
+        }
+        Insert: {
+          amount: number
+          created_at?: string | null
+          id?: string
+          metadata?: Json | null
+          status?: string | null
+          token_symbol?: string | null
+          tx_hash?: string | null
+          type: string
+          user_id: string
+        }
+        Update: {
+          amount?: number
+          created_at?: string | null
+          id?: string
+          metadata?: Json | null
+          status?: string | null
+          token_symbol?: string | null
+          tx_hash?: string | null
+          type?: string
+          user_id?: string
+        }
+        Relationships: []
       }
       user_roles: {
         Row: {
