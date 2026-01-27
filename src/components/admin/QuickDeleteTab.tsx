@@ -111,9 +111,7 @@ const QuickDeleteTab = ({ users, adminId, onRefresh }: QuickDeleteTabProps) => {
     setLoading(selectedUser.id);
     try {
       const { error } = await supabase.rpc('ban_user_permanently', {
-        p_admin_id: adminId,
-        p_user_id: selectedUser.id,
-        p_reason: banReason
+        target_user_id: selectedUser.id
       });
 
       if (error) throw error;

@@ -76,7 +76,7 @@ export const AppHonorBoard = memo(() => {
       const transactions = transactionsResult.data || [];
       const transactionsByToken: Record<string, number> = {};
       
-      transactions.forEach((t: { amount: string; token_symbol: string }) => {
+      transactions.forEach((t: { amount: number; token_symbol: string | null }) => {
         const symbol = t.token_symbol?.toUpperCase() || 'CAMLY';
         const amount = Number(t.amount) || 0;
         transactionsByToken[symbol] = (transactionsByToken[symbol] || 0) + amount;

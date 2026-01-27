@@ -79,9 +79,7 @@ const WalletAbuseTab = ({ users, adminId, onRefresh }: WalletAbuseTabProps) => {
     setLoading(user.id);
     try {
       const { error } = await supabase.rpc('ban_user_permanently', {
-        p_admin_id: adminId,
-        p_user_id: user.id,
-        p_reason: 'Lạm dụng ví/profile'
+        target_user_id: user.id
       });
 
       if (error) throw error;
@@ -100,9 +98,7 @@ const WalletAbuseTab = ({ users, adminId, onRefresh }: WalletAbuseTabProps) => {
     try {
       for (const user of walletGroup.users) {
         await supabase.rpc('ban_user_permanently', {
-          p_admin_id: adminId,
-          p_user_id: user.id,
-          p_reason: `Ví dùng chung: ${walletGroup.wallet_address}`
+          target_user_id: user.id
         });
       }
       toast.success(`Đã cấm ${walletGroup.users.length} tài khoản dùng chung ví`);

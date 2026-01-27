@@ -87,11 +87,6 @@ export const WalletLoginContent = ({
           type: 'email'
         });
         if (verifyError) throw verifyError;
-
-        // Update last_login_platform to 'FUN Profile'
-        await supabase.from('profiles').update({
-          last_login_platform: 'FUN Profile'
-        }).eq('id', data.user_id);
         toast.success(data.is_new_user ? t('welcomeNewUser') : t('welcomeBack'));
         onSuccess(data.user_id, data.is_new_user);
       } else {

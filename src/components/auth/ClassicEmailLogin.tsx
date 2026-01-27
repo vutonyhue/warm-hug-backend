@@ -55,10 +55,6 @@ export const ClassicEmailLogin = ({
         });
         if (error) throw error;
         if (data.user) {
-          // Update last_login_platform
-          await supabase.from('profiles').update({
-            last_login_platform: 'FUN Profile'
-          }).eq('id', data.user.id);
           toast.success(t('welcomeBack'));
           onSuccess(data.user.id, false);
         }
@@ -78,12 +74,6 @@ export const ClassicEmailLogin = ({
         });
         if (error) throw error;
         if (data.user) {
-          // Update last_login_platform for new user
-          setTimeout(async () => {
-            await supabase.from('profiles').update({
-              last_login_platform: 'FUN Profile'
-            }).eq('id', data.user!.id);
-          }, 1000);
           toast.success(t('authSuccessSignUp'));
           onSuccess(data.user.id, true);
         }

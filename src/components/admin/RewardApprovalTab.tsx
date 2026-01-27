@@ -141,21 +141,23 @@ const RewardApprovalTab = ({ adminId, onRefresh }: RewardApprovalTabProps) => {
       // Record approval
       await supabase.from('reward_approvals').insert({
         user_id: user.id,
-        amount: user.claimable_amount,
-        status: 'approved',
+        action: 'approved',
+        new_amount: user.claimable_amount,
         admin_id: adminId,
-        admin_note: 'Đã duyệt thưởng (RPC V2)',
-        reviewed_at: new Date().toISOString()
+        notes: 'Đã duyệt thưởng (RPC V2)'
       });
 
-      // Log the action
-      await supabase.from('audit_logs').insert({
-        admin_id: adminId,
-        action: 'APPROVE_REWARD_V2',
-        target_user_id: user.id,
-        reason: 'Đã duyệt thưởng',
-        details: { amount: user.claimable_amount, total_reward: user.total_reward }
-      });
+      // Log the action (audit_logs may not exist, skip if error)
+      try {
+        await supabase.from('audit_logs').insert({
+          admin_id: adminId,
+          action: 'APPROVE_REWARD_V2',
+          target_id: user.id,
+          target_type: 'user'
+        });
+      } catch (e) {
+        console.warn('Audit log failed:', e);
+      }
       
       toast.success(`Đã duyệt ${formatNumber(user.claimable_amount)} CAMLY cho ${user.username}`);
       loadRewardData();
@@ -186,11 +188,10 @@ const RewardApprovalTab = ({ adminId, onRefresh }: RewardApprovalTabProps) => {
       // Record rejection
       await supabase.from('reward_approvals').insert({
         user_id: selectedUser.id,
-        amount: selectedUser.claimable_amount,
-        status: 'rejected',
+        action: 'rejected',
+        new_amount: selectedUser.claimable_amount,
         admin_id: adminId,
-        admin_note: rejectReason,
-        reviewed_at: new Date().toISOString()
+        notes: rejectReason
       });
 
       // Update status
@@ -198,15 +199,6 @@ const RewardApprovalTab = ({ adminId, onRefresh }: RewardApprovalTabProps) => {
         .from('profiles')
         .update({ reward_status: 'rejected' })
         .eq('id', selectedUser.id);
-
-      // Log the action
-      await supabase.from('audit_logs').insert({
-        admin_id: adminId,
-        action: 'REJECT_REWARD_V2',
-        target_user_id: selectedUser.id,
-        reason: rejectReason,
-        details: { amount: selectedUser.claimable_amount }
-      });
       
       toast.success(`Đã từ chối thưởng của ${selectedUser.username}`);
       setRejectDialogOpen(false);
