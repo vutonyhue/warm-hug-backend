@@ -41,28 +41,18 @@ const Leaderboard = () => {
 
       if (error) throw error;
 
-      const usersWithRewards: LeaderboardUser[] = (data || []).map((user: {
-        id: string;
-        username: string | null;
-        avatar_url: string | null;
-        claimable: number;
-        full_name: string | null;
-      }) => ({
+      const usersWithRewards: LeaderboardUser[] = (data || []).map((user) => ({
         id: user.id,
         username: user.username || 'Unknown',
         avatar_url: user.avatar_url,
-        totalReward: user.claimable || 0,
-        id: user.id,
-        username: user.username,
-        avatar_url: user.avatar_url,
-        full_name: null,
-        posts_count: user.posts_count || 0,
-        comments_count: user.comments_count || 0,
-        reactions_on_posts: user.reactions_on_posts || 0,
-        friends_count: user.friends_count || 0,
-        livestreams_count: user.livestreams_count || 0,
-        today_reward: user.today_reward || 0,
-        total_reward: user.total_reward || 0
+        full_name: user.full_name,
+        posts_count: 0,
+        comments_count: 0,
+        reactions_on_posts: 0,
+        friends_count: 0,
+        livestreams_count: 0,
+        today_reward: 0,
+        total_reward: user.claimable || 0
       }));
 
       setUsers(usersWithRewards);
