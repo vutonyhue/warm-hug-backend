@@ -22,9 +22,7 @@ npm-debug.log*
 coverage/
 
 # Environment
-.env
-.env.local
-.env.*.local
+
 
 # Temporary
 tmp/
