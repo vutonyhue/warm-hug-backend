@@ -88,6 +88,9 @@ export const FacebookCreatePost = ({ onPostCreated }: FacebookCreatePostProps) =
   // Refs for hidden file inputs (direct trigger on click) - must be before any returns
   const photoVideoInputRef = useRef<HTMLInputElement>(null);
   const liveVideoInputRef = useRef<HTMLInputElement>(null);
+  
+  // Cached session ref to avoid slow API calls during submit
+  const cachedSessionRef = useRef<any>(null);
 
   // Prevent accidental tab close during upload
   useEffect(() => {
@@ -102,6 +105,21 @@ export const FacebookCreatePost = ({ onPostCreated }: FacebookCreatePostProps) =
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [videoUploadState]);
+
+  // Subscribe to auth state changes to cache session
+  useEffect(() => {
+    // Initial session fetch
+    supabase.auth.getSession().then(({ data }) => {
+      cachedSessionRef.current = data.session;
+    });
+    
+    // Subscribe to auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      cachedSessionRef.current = session;
+    });
+    
+    return () => subscription.unsubscribe();
+  }, []);
 
   useEffect(() => {
     const fetchProfile = async () => {
@@ -292,37 +310,75 @@ export const FacebookCreatePost = ({ onPostCreated }: FacebookCreatePostProps) =
       // Check if aborted
       if (abortController.signal.aborted) throw new Error('Đã huỷ');
       
-      // Get session with 5 second timeout
+      // === OPTIMIZED SESSION RETRIEVAL ===
+      // Priority: 1. Cached session → 2. Quick API call (3s) → 3. localStorage fallback
       const authStartTime = Date.now();
-      let session;
-      try {
-        const sessionResult = await Promise.race([
-          supabase.auth.getSession(),
-          new Promise<never>((_, reject) => 
-            setTimeout(() => reject(new Error('getSession timeout (15s)')), 15000)
-          )
-        ]);
-        session = sessionResult.data.session;
-        console.log('[CreatePost] getSession completed in', Date.now() - authStartTime, 'ms');
-      } catch (authError: any) {
-        console.error('[CreatePost] getSession error:', authError.message);
-        // Try refresh session as fallback
-        console.log('[CreatePost] Trying refreshSession...');
-        const { data: refreshData } = await supabase.auth.refreshSession();
-        if (!refreshData.session) {
-          throw new Error('Phiên đăng nhập hết hạn, vui lòng đăng nhập lại');
+      let session = cachedSessionRef.current;
+      
+      if (session) {
+        console.log('[CreatePost] Using cached session');
+      } else {
+        console.log('[CreatePost] No cached session, trying quick API call...');
+        
+        // Try quick getSession with 3s timeout
+        try {
+          const sessionResult = await Promise.race([
+            supabase.auth.getSession(),
+            new Promise<never>((_, reject) => 
+              setTimeout(() => reject(new Error('getSession timeout (3s)')), 3000)
+            )
+          ]);
+          session = sessionResult.data.session;
+          if (session) cachedSessionRef.current = session;
+          console.log('[CreatePost] getSession completed in', Date.now() - authStartTime, 'ms');
+        } catch (authError: any) {
+          console.warn('[CreatePost] getSession timeout/error:', authError.message);
+          
+          // Fallback: Read directly from localStorage
+          console.log('[CreatePost] Trying localStorage fallback...');
+          try {
+            const storageKey = `sb-xxsgapdiiuuajihsmjzt-auth-token`;
+            const stored = localStorage.getItem(storageKey);
+            if (stored) {
+              const parsed = JSON.parse(stored);
+              if (parsed.access_token && parsed.user) {
+                session = {
+                  access_token: parsed.access_token,
+                  refresh_token: parsed.refresh_token,
+                  user: parsed.user,
+                  expires_at: parsed.expires_at,
+                };
+                console.log('[CreatePost] Using localStorage session fallback');
+              }
+            }
+          } catch (storageError) {
+            console.error('[CreatePost] localStorage fallback failed:', storageError);
+          }
         }
-        session = refreshData.session;
-        console.log('[CreatePost] refreshSession succeeded');
       }
       
-      if (!session) {
-        console.log('[CreatePost] No session found, trying refresh...');
-        const { data: refreshData } = await supabase.auth.refreshSession();
-        if (!refreshData.session) {
-          throw new Error('Chưa đăng nhập');
+      // Final check - if still no session, try one more refresh
+      if (!session?.access_token) {
+        console.log('[CreatePost] No session found, trying refresh as last resort...');
+        try {
+          const { data: refreshData } = await Promise.race([
+            supabase.auth.refreshSession(),
+            new Promise<never>((_, reject) => 
+              setTimeout(() => reject(new Error('refreshSession timeout (5s)')), 5000)
+            )
+          ]);
+          if (refreshData?.session) {
+            session = refreshData.session;
+            cachedSessionRef.current = session;
+            console.log('[CreatePost] refreshSession succeeded');
+          }
+        } catch (refreshError: any) {
+          console.error('[CreatePost] refreshSession failed:', refreshError.message);
         }
-        session = refreshData.session;
+      }
+      
+      if (!session?.access_token) {
+        throw new Error('Chưa đăng nhập hoặc phiên hết hạn. Vui lòng tải lại trang.');
       }
 
       console.log('[CreatePost] Auth OK, user:', session.user.id.substring(0, 8) + '...');
