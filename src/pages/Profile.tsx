@@ -204,8 +204,8 @@ const Profile = () => {
       // Fetch friends count and preview
       const { data: friendsData, count } = await supabase
         .from('friendships')
-        .select('user_id, friend_id', { count: 'exact' })
-        .or(`user_id.eq.${profileId},friend_id.eq.${profileId}`)
+        .select('requester_id, addressee_id', { count: 'exact' })
+        .or(`requester_id.eq.${profileId},addressee_id.eq.${profileId}`)
         .eq('status', 'accepted')
         .limit(6);
 
@@ -215,7 +215,7 @@ const Profile = () => {
       if (friendsData && friendsData.length > 0) {
         // Get the friend IDs (the "other" person in each friendship)
         const friendIds = friendsData.map(f => 
-          f.user_id === profileId ? f.friend_id : f.user_id
+          f.requester_id === profileId ? f.addressee_id : f.requester_id
         );
         
         const { data: friendProfiles } = await supabase

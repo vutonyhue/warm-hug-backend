@@ -86,7 +86,7 @@ const Admin = () => {
       
       if (profiles) {
         // Get posts count for each user
-        const { data: rewardsData } = await supabase.rpc('get_user_rewards', { limit_count: 500 });
+        const { data: rewardsData } = await supabase.rpc('get_user_rewards_v2', { limit_count: 500 });
         const rewardsMap = new Map(rewardsData?.map((r: any) => [r.id, r]) || []);
 
         const enrichedUsers = profiles.map(profile => {

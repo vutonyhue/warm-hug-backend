@@ -38,9 +38,8 @@ const fetchPostStats = async (postIds: string[]): Promise<Record<string, PostSta
     const [reactionsRes, commentsRes, sharesRes] = await Promise.all([
       supabase
         .from('reactions')
-        .select('id, user_id, type, post_id')
-        .in('post_id', postIds)
-        .is('comment_id', null),
+        .select('id, user_id, reaction_type, post_id')
+        .in('post_id', postIds),
       supabase
         .from('comments')
         .select('post_id')
@@ -63,7 +62,7 @@ const fetchPostStats = async (postIds: string[]): Promise<Record<string, PostSta
       const postShares = sharesRes.data?.filter(s => s.original_post_id === postId) || [];
 
       stats[postId] = {
-        reactions: postReactions.map(r => ({ id: r.id, user_id: r.user_id, type: r.type })),
+        reactions: postReactions.map(r => ({ id: r.id, user_id: r.user_id, type: r.reaction_type })),
         commentCount: postComments.length,
         shareCount: postShares.length,
       };
@@ -83,7 +82,7 @@ const fetchPostStats = async (postIds: string[]): Promise<Record<string, PostSta
 const fetchFeedPage = async (cursor: string | null): Promise<FeedPage> => {
   let query = supabase
     .from('posts')
-    .select(`*, profiles!posts_user_id_fkey (username, avatar_url)`)
+    .select('*')
     .order('created_at', { ascending: false })
     .limit(POSTS_PER_PAGE + 1);
 
@@ -98,9 +97,24 @@ const fetchFeedPage = async (cursor: string | null): Promise<FeedPage> => {
   const hasMore = (posts?.length || 0) > POSTS_PER_PAGE;
   const postsToReturn = hasMore ? posts?.slice(0, POSTS_PER_PAGE) : posts;
 
+  // Fetch profiles for all posts
+  const userIds = [...new Set((postsToReturn || []).map(p => p.user_id))];
+  const { data: profilesData } = await supabase
+    .from('profiles')
+    .select('id, username, avatar_url')
+    .in('id', userIds);
+
+  const profilesMap = new Map(profilesData?.map(p => [p.id, p]) || []);
+
   const postsData: FeedPost[] = (postsToReturn || []).map(post => ({
-    ...post,
+    id: post.id,
+    content: post.content,
+    image_url: post.image_url,
+    video_url: post.video_url,
     media_urls: (post.media_urls as Array<{ url: string; type: 'image' | 'video' }>) || null,
+    created_at: post.created_at,
+    user_id: post.user_id,
+    profiles: profilesMap.get(post.user_id) || { username: 'Unknown', avatar_url: null },
   }));
   
   const postIds = postsData.map(p => p.id);

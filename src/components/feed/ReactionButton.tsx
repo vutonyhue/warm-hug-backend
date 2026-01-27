@@ -259,7 +259,7 @@ export const ReactionButton = ({
           // Update existing reaction
           const { error } = await supabase
             .from('reactions')
-            .update({ type: reactionType })
+            .update({ reaction_type: reactionType })
             .eq('id', existingReaction.id);
 
           if (error) throw error;
@@ -270,8 +270,7 @@ export const ReactionButton = ({
             .insert({
               post_id: postId,
               user_id: currentUserId,
-              type: reactionType,
-              comment_id: null,
+              reaction_type: reactionType,
             });
 
           if (error) throw error;

@@ -159,10 +159,10 @@ const WalletCenterContainer = () => {
     if (session?.user) {
       const { data } = await supabase
         .from('profiles')
-        .select('username, avatar_url, full_name, reward_status, admin_notes')
+        .select('username, avatar_url, full_name, reward_status')
         .eq('id', session.user.id)
         .single();
-      if (data) setProfile(data);
+      if (data) setProfile(data as Profile);
     }
   };
 
@@ -238,7 +238,7 @@ const WalletCenterContainer = () => {
     const { count: friendsCount } = await supabase
       .from('friendships')
       .select('id', { count: 'exact', head: true })
-      .or(`user_id.eq.${userId},friend_id.eq.${userId}`)
+      .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`)
       .eq('status', 'accepted');
     
     // Calculate total reward
@@ -276,16 +276,21 @@ const WalletCenterContainer = () => {
 
     if (data) {
       const currentAddress = activeWalletAddress?.toLowerCase();
-      setTransactions(data.map(tx => ({
-        id: tx.id,
-        type: tx.from_address.toLowerCase() === currentAddress ? 'sent' : 'received',
-        description: tx.from_address.toLowerCase() === currentAddress 
-          ? `Sent ${tx.amount} ${tx.token_symbol} to ${tx.to_address.slice(0, 6)}...${tx.to_address.slice(-4)}`
-          : `Received ${tx.amount} ${tx.token_symbol}`,
-        amount: tx.amount,
-        token_symbol: tx.token_symbol,
-        created_at: tx.created_at,
-      })));
+      setTransactions(data.map(tx => {
+        const metadata = tx.metadata as { from_address?: string; to_address?: string } | null;
+        const fromAddress = metadata?.from_address?.toLowerCase() || '';
+        const toAddress = metadata?.to_address || '';
+        return {
+          id: tx.id,
+          type: fromAddress === currentAddress ? 'sent' : 'received',
+          description: fromAddress === currentAddress 
+            ? `Sent ${tx.amount} ${tx.token_symbol} to ${toAddress.slice(0, 6)}...${toAddress.slice(-4)}`
+            : `Received ${tx.amount} ${tx.token_symbol}`,
+          amount: String(tx.amount),
+          token_symbol: tx.token_symbol || 'BNB',
+          created_at: tx.created_at || '',
+        };
+      }));
     }
   };
 

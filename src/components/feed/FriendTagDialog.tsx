@@ -47,15 +47,15 @@ export const FriendTagDialog = ({
         // Get all accepted friendships
         const { data: friendships, error } = await supabase
           .from('friendships')
-          .select('user_id, friend_id')
+          .select('requester_id, addressee_id')
           .eq('status', 'accepted')
-          .or(`user_id.eq.${currentUserId},friend_id.eq.${currentUserId}`);
+          .or(`requester_id.eq.${currentUserId},addressee_id.eq.${currentUserId}`);
 
         if (error) throw error;
 
         // Extract friend IDs (the other user in each friendship)
         const friendIds = friendships?.map(f => 
-          f.user_id === currentUserId ? f.friend_id : f.user_id
+          f.requester_id === currentUserId ? f.addressee_id : f.requester_id
         ) || [];
 
         if (friendIds.length === 0) {

@@ -127,9 +127,8 @@ const FacebookPostCardComponent = ({
           const [reactionsRes, commentsRes, sharesRes] = await Promise.all([
             supabase
               .from('reactions')
-              .select('id, user_id, type')
-              .eq('post_id', post.id)
-              .is('comment_id', null),
+              .select('id, user_id, reaction_type')
+              .eq('post_id', post.id),
             supabase
               .from('comments')
               .select('*', { count: 'exact', head: true })
@@ -141,7 +140,13 @@ const FacebookPostCardComponent = ({
           ]);
 
           if (reactionsRes.data) {
-            processReactions(reactionsRes.data);
+            // Map reaction_type to type for compatibility
+            const mappedReactions = reactionsRes.data.map(r => ({
+              id: r.id,
+              user_id: r.user_id,
+              type: r.reaction_type
+            }));
+            processReactions(mappedReactions);
           }
           setCommentCount(commentsRes.count || 0);
           setShareCount(sharesRes.count || 0);
@@ -160,18 +165,17 @@ const FacebookPostCardComponent = ({
       // Refetch only this post's data on realtime update
       const { data: reactions } = await supabase
         .from('reactions')
-        .select('id, user_id, type')
-        .eq('post_id', post.id)
-        .is('comment_id', null);
+        .select('id, user_id, reaction_type')
+        .eq('post_id', post.id);
 
       if (reactions) {
         setLikeCount(reactions.length);
         const userReaction = reactions.find((r) => r.user_id === currentUserId);
-        setCurrentReaction(userReaction?.type || null);
+        setCurrentReaction(userReaction?.reaction_type || null);
 
         const counts: Record<string, number> = {};
         reactions.forEach((r) => {
-          counts[r.type] = (counts[r.type] || 0) + 1;
+          counts[r.reaction_type] = (counts[r.reaction_type] || 0) + 1;
         });
         setReactionCounts(
           Object.entries(counts).map(([type, count]) => ({ type, count }))

@@ -24,14 +24,14 @@ export const FacebookRightSidebar = memo(() => {
 
     const { data: friendships } = await supabase
       .from('friendships')
-      .select('user_id, friend_id')
-      .or(`user_id.eq.${session.user.id},friend_id.eq.${session.user.id}`)
+      .select('requester_id, addressee_id')
+      .or(`requester_id.eq.${session.user.id},addressee_id.eq.${session.user.id}`)
       .eq('status', 'accepted')
       .limit(10);
 
     if (friendships && friendships.length > 0) {
       const friendIds = friendships.map(f => 
-        f.user_id === session.user.id ? f.friend_id : f.user_id
+        f.requester_id === session.user.id ? f.addressee_id : f.requester_id
       );
 
       const { data: profiles } = await supabase

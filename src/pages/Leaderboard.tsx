@@ -43,16 +43,15 @@ const Leaderboard = () => {
 
       const usersWithRewards: LeaderboardUser[] = (data || []).map((user: {
         id: string;
-        username: string;
+        username: string | null;
         avatar_url: string | null;
-        posts_count: number;
-        comments_count: number;
-        reactions_on_posts: number;
-        friends_count: number;
-        livestreams_count: number;
-        today_reward: number;
-        total_reward: number;
+        claimable: number;
+        full_name: string | null;
       }) => ({
+        id: user.id,
+        username: user.username || 'Unknown',
+        avatar_url: user.avatar_url,
+        totalReward: user.claimable || 0,
         id: user.id,
         username: user.username,
         avatar_url: user.avatar_url,

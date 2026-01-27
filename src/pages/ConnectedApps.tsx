@@ -101,30 +101,25 @@ const ConnectedApps = () => {
       // Fetch tokens (connected apps)
       const { data: tokens, error: tokensError } = await supabase
         .from('cross_platform_tokens')
-        .select('id, client_id, scope, created_at, last_used_at, is_revoked')
+        .select('id, client_id, scope, created_at, revoked')
         .eq('user_id', user.id)
-        .eq('is_revoked', false);
+        .eq('revoked', false);
 
       if (tokensError) throw tokensError;
 
       // Get client names from oauth_clients (for admins) or use default names
       const appsWithNames: ConnectedApp[] = (tokens || []).map(token => ({
-        ...token,
+        id: token.id,
+        client_id: token.client_id,
+        scope: token.scope,
+        created_at: token.created_at,
         client_name: getClientDisplayName(token.client_id)
       }));
 
       setConnectedApps(appsWithNames);
 
-      // Fetch cross_platform_data from profile
-      const { data: profile, error: profileError } = await supabase
-        .from('profiles')
-        .select('cross_platform_data')
-        .eq('id', user.id)
-        .single();
-
-      if (profileError) throw profileError;
-      
-      setCrossPlatformData(profile?.cross_platform_data as CrossPlatformData || null);
+      // Skip cross_platform_data - column doesn't exist
+      setCrossPlatformData(null);
     } catch (error) {
       console.error('Error fetching connected apps:', error);
       toast.error('Không thể tải danh sách ứng dụng');
@@ -149,7 +144,7 @@ const ConnectedApps = () => {
     try {
       const { error } = await supabase
         .from('cross_platform_tokens')
-        .update({ is_revoked: true })
+        .update({ revoked: true })
         .eq('id', selectedApp.id);
 
       if (error) throw error;
