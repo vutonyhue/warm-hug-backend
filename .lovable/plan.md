@@ -1,232 +1,201 @@
 
-# Kế hoạch: Fix Build Errors + Thiết kế Edge Functions API Layer
+# Kế hoạch Fix Lỗi Đăng Bài Timeout + Tối ưu Authentication Flow
 
-## Phần 1: Fix Build Errors
+## Tóm tắt vấn đề
 
-### 1.1 AdminMigration.tsx - Comments table schema mismatch
+### Nguyên nhân gốc: **Supabase Auth API chậm/overloaded**
+- `supabase.auth.getSession()` bị timeout sau 15 giây
+- `supabase.auth.refreshSession()` cũng bị timeout
+- Auth logs cho thấy một số requests mất **49-119 giây** để hoàn thành
+- **Lỗi KHÔNG liên quan đến Cloudflare R2** - timeout xảy ra TRƯỚC khi upload
 
-**Vấn đề:** 
-- Query đang select `image_url, video_url` nhưng bảng `comments` chỉ có `media_url, media_type`
-- Có 2 nơi cần sửa: dòng 393-396 và 788-791
-
-**Sửa lỗi:**
-```typescript
-// Line 393-396: Thay đổi query
-const { data: comments } = await supabase
-  .from('comments')
-  .select('id, media_url, media_type')
-  .not('media_url', 'is', null);
-
-// Line 788-791: Thay đổi query tương tự
-const { data: comments } = await supabase
-  .from('comments')
-  .select('id, media_url, media_type')
-  .not('media_url', 'is', null);
-```
-
-**Sửa forEach logic (lines 831-838):**
-```typescript
-comments?.forEach(comment => {
-  if (comment.media_url && comment.media_type === 'image' && isSupabaseUrl(comment.media_url)) {
-    urlsToMigrate.push({ table: 'comments', id: comment.id, field: 'media_url', url: comment.media_url! });
-  }
-  if (comment.media_url && comment.media_type === 'video' && isSupabaseUrl(comment.media_url)) {
-    urlsToMigrate.push({ table: 'comments', id: comment.id, field: 'media_url', url: comment.media_url! });
-  }
-});
-```
-
----
-
-### 1.2 ConnectedApps.tsx - Missing interface properties
-
-**Vấn đề:**
-- Interface `ConnectedApp` yêu cầu `last_used_at` và `is_revoked`
-- Nhưng mapping object thiếu 2 properties này
-
-**Sửa lỗi (lines 111-118):**
-```typescript
-const appsWithNames: ConnectedApp[] = (tokens || []).map(token => ({
-  id: token.id,
-  client_id: token.client_id,
-  scope: token.scope ? token.scope.split(',') : [],
-  created_at: token.created_at,
-  client_name: getClientDisplayName(token.client_id),
-  last_used_at: null,  // Thêm property này
-  is_revoked: false    // Token đã được filter revoked=false nên luôn là false
-}));
-```
-
----
-
-### 1.3 Leaderboard.tsx - Duplicate properties + missing fields
-
-**Vấn đề:**
-- Object literal có duplicate keys (`id`, `username`, `avatar_url`)
-- RPC `get_user_rewards_v2` không return các fields: `posts_count`, `comments_count`, etc.
-
-**Sửa lỗi - Đơn giản hóa (chỉ dùng data từ RPC):**
-```typescript
-const usersWithRewards: LeaderboardUser[] = (data || []).map((user) => ({
-  id: user.id,
-  username: user.username || 'Unknown',
-  avatar_url: user.avatar_url,
-  full_name: user.full_name,
-  posts_count: 0,          // RPC không có, đặt default
-  comments_count: 0,
-  reactions_on_posts: 0,
-  friends_count: 0,
-  livestreams_count: 0,
-  today_reward: 0,
-  total_reward: user.claimable || 0
-}));
-```
-
-**Hoặc:** Cập nhật RPC function `get_user_rewards_v2` để return thêm các field cần thiết (đề xuất trong Phần 2).
-
----
-
-## Phần 2: Edge Functions API Layer
-
-### 2.1 Kiến trúc hiện tại vs Đề xuất
-
+### Flow hiện tại (có vấn đề):
 ```text
-+------------------+        +------------------+        +------------------+
-|                  |        |                  |        |                  |
-|    Frontend      | -----> |  Edge Functions  | -----> |    Database      |
-|    (React)       |        |  (API Layer)     |        |    (Postgres)    |
-|                  |        |                  |        |                  |
-+------------------+        +------------------+        +------------------+
-                                    |
-                                    v
-                           +------------------+
-                           |  External APIs   |
-                           | (Cloudflare, etc)|
-                           +------------------+
+User click "Đăng" 
+   → getSession() [CHẬM - gọi API mỗi lần]
+   → TIMEOUT 15s 
+   → refreshSession() [CHẬM - gọi API lần nữa]
+   → TIMEOUT 90s 
+   → Lỗi
 ```
 
-### 2.2 Edge Functions cần tạo mới
+---
 
-| Function | Mục đích | Priority |
-|----------|----------|----------|
-| `api-leaderboard` | Lấy leaderboard data với full stats | Cao |
-| `api-feed` | Lấy feed posts với pagination | Cao |
-| `api-profile` | Lấy/cập nhật profile | Cao |
-| `api-friends` | Quản lý friendships | Trung bình |
-| `api-notifications` | Lấy/đánh dấu đã đọc notifications | Trung bình |
-| `api-reactions` | Thêm/xóa reactions | Cao |
-| `api-comments` | CRUD comments | Cao |
+## Giải pháp đề xuất
 
-### 2.3 Ví dụ: api-leaderboard Edge Function
+### Fix 1: Sử dụng cached session thay vì gọi API
 
-```typescript
-// supabase/functions/api-leaderboard/index.ts
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+**Vấn đề**: `supabase.auth.getSession()` đọc từ localStorage nhanh, nhưng có thể trigger refresh token nếu token hết hạn → gọi API chậm.
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
-
-Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
-  }
-
-  const supabase = createClient(
-    Deno.env.get('SUPABASE_URL')!,
-    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-  );
-
-  const url = new URL(req.url);
-  const limit = parseInt(url.searchParams.get('limit') || '100');
-  const category = url.searchParams.get('category') || 'reward';
-
-  // Aggregate data từ nhiều tables
-  const { data: profiles } = await supabase
-    .from('profiles')
-    .select('id, username, full_name, avatar_url, pending_reward')
-    .order('pending_reward', { ascending: false })
-    .limit(limit);
-
-  // Đếm posts, comments, friends cho mỗi user
-  const enrichedData = await Promise.all(
-    (profiles || []).map(async (profile) => {
-      const [posts, comments, friends, reactions, livestreams] = await Promise.all([
-        supabase.from('posts').select('id', { count: 'exact', head: true }).eq('user_id', profile.id),
-        supabase.from('comments').select('id', { count: 'exact', head: true }).eq('user_id', profile.id),
-        supabase.from('friendships').select('id', { count: 'exact', head: true })
-          .or(`requester_id.eq.${profile.id},addressee_id.eq.${profile.id}`)
-          .eq('status', 'accepted'),
-        supabase.from('reactions').select('id', { count: 'exact', head: true })
-          .in('post_id', /* user's post ids */),
-        supabase.from('livestreams').select('id', { count: 'exact', head: true }).eq('user_id', profile.id)
-      ]);
-
-      return {
-        ...profile,
-        posts_count: posts.count || 0,
-        comments_count: comments.count || 0,
-        friends_count: friends.count || 0,
-        reactions_on_posts: reactions.count || 0,
-        livestreams_count: livestreams.count || 0,
-        total_reward: profile.pending_reward || 0,
-        today_reward: 0 // Calculate based on today's activities
-      };
-    })
-  );
-
-  // Sort theo category
-  enrichedData.sort((a, b) => {
-    const key = category === 'reward' ? 'total_reward' : `${category}_count`;
-    return (b[key] || 0) - (a[key] || 0);
-  });
-
-  return new Response(JSON.stringify(enrichedData), {
-    headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-  });
-});
-```
-
-### 2.4 Frontend sẽ gọi Edge Functions thay vì trực tiếp
+**Giải pháp**: Kiểm tra session từ localStorage trước, chỉ refresh nếu thực sự cần thiết:
 
 ```typescript
 // Thay vì:
-const { data } = await supabase.rpc('get_user_rewards_v2', { limit_count: 100 });
+const { data: { session } } = await supabase.auth.getSession();
 
-// Sẽ gọi:
-const response = await supabase.functions.invoke('api-leaderboard', {
-  body: { limit: 100, category: 'reward' }
-});
+// Dùng cached session từ auth state:
+const { data: { session } } = await supabase.auth.getSession();
+
+// Hoặc tốt hơn - lưu session vào state component khi mount
 ```
 
-### 2.5 Lợi ích của Edge Functions Layer
+### Fix 2: Pre-fetch session khi mở dialog
 
-| Lợi ích | Mô tả |
-|---------|-------|
-| Bảo mật | Frontend không truy cập trực tiếp DB, chỉ qua API |
-| Tối ưu | Aggregate data ở server, giảm roundtrips |
-| Linh hoạt | Dễ thay đổi logic mà không cập nhật frontend |
-| Caching | Có thể cache kết quả ở edge |
-| Rate limiting | Kiểm soát request rate |
-| Logging | Log tập trung cho monitoring |
+Thay vì chờ đến lúc submit mới lấy session, lấy sẵn khi user mở dialog đăng bài:
+
+```typescript
+// Trong useEffect khi dialog mở
+useEffect(() => {
+  if (isDialogOpen) {
+    // Pre-fetch session để sẵn sàng khi submit
+    supabase.auth.getSession().then(({ data }) => {
+      cachedSessionRef.current = data.session;
+    });
+  }
+}, [isDialogOpen]);
+```
+
+### Fix 3: Fallback sử dụng token từ localStorage
+
+Nếu API auth bị chậm, đọc trực tiếp từ localStorage như backup:
+
+```typescript
+const getSessionWithFallback = async () => {
+  try {
+    // Try normal API first with short timeout
+    const result = await Promise.race([
+      supabase.auth.getSession(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000))
+    ]);
+    return result.data.session;
+  } catch {
+    // Fallback: read from localStorage directly
+    const stored = localStorage.getItem('sb-xxsgapdiiuuajihsmjzt-auth-token');
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      return {
+        access_token: parsed.access_token,
+        user: parsed.user,
+        // ...
+      };
+    }
+    return null;
+  }
+};
+```
+
+### Fix 4: Cải thiện error handling và retry logic
+
+```typescript
+const handleSubmit = async () => {
+  // Thử tối đa 3 lần với exponential backoff
+  let session = null;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const { data } = await Promise.race([
+        supabase.auth.getSession(),
+        timeout(5000 * attempt) // 5s, 10s, 15s
+      ]);
+      session = data.session;
+      if (session) break;
+    } catch (e) {
+      if (attempt === 3) throw e;
+      await delay(1000 * attempt);
+    }
+  }
+};
+```
 
 ---
 
-## Tóm tắt thực hiện
+## Thay đổi files
 
-### Phase 1: Fix Build Errors (Ngay)
-1. Sửa `AdminMigration.tsx` - comments query
-2. Sửa `ConnectedApps.tsx` - thêm missing properties  
-3. Sửa `Leaderboard.tsx` - xóa duplicate keys
+### 1. `src/components/feed/FacebookCreatePost.tsx`
 
-### Phase 2: Edge Functions (Sau khi build pass)
-1. Tạo `api-leaderboard` Edge Function với full aggregation
-2. Cập nhật Leaderboard.tsx để gọi Edge Function
-3. Tạo thêm các Edge Functions khác theo priority
+**Dòng 295-326** - Thay thế logic lấy session:
 
-### Files cần sửa:
-- `src/pages/AdminMigration.tsx` (4 locations)
-- `src/pages/ConnectedApps.tsx` (1 location)
-- `src/pages/Leaderboard.tsx` (1 location)
-- `supabase/functions/api-leaderboard/index.ts` (tạo mới)
+```typescript
+// BEFORE: Gọi API mỗi lần submit
+const { data: { session } } = await supabase.auth.getSession();
+
+// AFTER: Dùng cached session + fallback
+let session = cachedSessionRef.current;
+if (!session) {
+  // Try quick getSession first
+  const quickResult = await Promise.race([
+    supabase.auth.getSession(),
+    new Promise((_, reject) => setTimeout(() => reject('timeout'), 3000))
+  ]).catch(() => ({ data: { session: null } }));
+  
+  session = quickResult.data.session;
+  
+  // Fallback to localStorage
+  if (!session) {
+    const stored = localStorage.getItem('sb-xxsgapdiiuuajihsmjzt-auth-token');
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      session = { access_token: parsed.access_token, user: parsed.user };
+    }
+  }
+}
+
+if (!session?.access_token) {
+  throw new Error('Chưa đăng nhập hoặc phiên hết hạn');
+}
+```
+
+**Thêm useRef** để cache session:
+```typescript
+const cachedSessionRef = useRef<any>(null);
+
+// Trong useEffect
+useEffect(() => {
+  const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+    cachedSessionRef.current = session;
+  });
+  return () => subscription.unsubscribe();
+}, []);
+```
+
+### 2. Tăng timeout trong `r2Upload.ts` (nếu cần)
+
+Hiện tại đã có timeout hợp lý (45s cho presigned URL, 180s cho upload), không cần thay đổi.
+
+---
+
+## Về Cloudflare R2
+
+### Cách hoạt động:
+```text
+1. Frontend gọi Edge Function `get-upload-url` với auth token
+2. Edge Function tạo presigned URL từ Cloudflare R2
+3. Frontend upload trực tiếp lên R2 bằng presigned URL
+4. URL công khai được trả về: https://media.fun.rich/posts/xxx.jpg
+5. URL được lưu vào bảng `posts` qua Edge Function `create-post`
+```
+
+### Xác nhận: R2 KHÔNG phải nguyên nhân timeout
+- Lỗi xảy ra ở bước **authentication** (step 1 trong flow đăng bài)
+- Trong trường hợp này không có media (mediaCount: 0)
+- R2 upload chỉ được gọi SAU khi có session hợp lệ
+
+---
+
+## Kế hoạch triển khai
+
+| Bước | Nội dung | Ưu tiên |
+|------|----------|---------|
+| 1 | Thêm session caching vào FacebookCreatePost.tsx | Cao |
+| 2 | Thêm localStorage fallback khi API chậm | Cao |
+| 3 | Pre-fetch session khi mở dialog | Trung bình |
+| 4 | Cải thiện retry logic với exponential backoff | Trung bình |
+| 5 | Thêm loading indicator chi tiết cho user | Thấp |
+
+---
+
+## Tổng kết
+
+- **Vấn đề**: Supabase Auth API đôi khi phản hồi rất chậm (49-119 giây)
+- **Giải pháp**: Cache session + fallback localStorage + pre-fetch + retry logic
+- **R2 không liên quan**: Lỗi xảy ra trước khi upload media
+- **Files cần sửa**: `src/components/feed/FacebookCreatePost.tsx`
