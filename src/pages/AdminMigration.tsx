@@ -392,8 +392,8 @@ const AdminMigration = () => {
 
       const { data: comments } = await supabase
         .from('comments')
-        .select('id, image_url, video_url')
-        .or('image_url.not.is.null,video_url.not.is.null');
+        .select('id, media_url, media_type')
+        .not('media_url', 'is', null);
 
       const urlsToProcess: Array<{
         table: string;
@@ -433,10 +433,7 @@ const AdminMigration = () => {
       });
 
       comments?.forEach(comment => {
-        if (comment.media_url && comment.media_type === 'image' && isSupabaseUrl(comment.media_url)) {
-          urlsToProcess.push({ table: 'comments', id: comment.id, field: 'media_url', url: comment.media_url! });
-        }
-        if (comment.media_url && comment.media_type === 'video' && isSupabaseUrl(comment.media_url)) {
+        if (comment.media_url && isSupabaseUrl(comment.media_url)) {
           urlsToProcess.push({ table: 'comments', id: comment.id, field: 'media_url', url: comment.media_url! });
         }
       });
@@ -787,8 +784,8 @@ const AdminMigration = () => {
 
       const { data: comments } = await supabase
         .from('comments')
-        .select('id, image_url, video_url')
-        .or('image_url.not.is.null,video_url.not.is.null');
+        .select('id, media_url, media_type')
+        .not('media_url', 'is', null);
 
       const urlsToMigrate: Array<{
         table: string;
@@ -829,11 +826,8 @@ const AdminMigration = () => {
       });
 
       comments?.forEach(comment => {
-        if (isSupabaseUrl(comment.image_url)) {
-          urlsToMigrate.push({ table: 'comments', id: comment.id, field: 'image_url', url: comment.image_url! });
-        }
-        if (isSupabaseUrl(comment.video_url)) {
-          urlsToMigrate.push({ table: 'comments', id: comment.id, field: 'video_url', url: comment.video_url! });
+        if (comment.media_url && isSupabaseUrl(comment.media_url)) {
+          urlsToMigrate.push({ table: 'comments', id: comment.id, field: 'media_url', url: comment.media_url! });
         }
       });
 

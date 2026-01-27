@@ -111,9 +111,11 @@ const ConnectedApps = () => {
       const appsWithNames: ConnectedApp[] = (tokens || []).map(token => ({
         id: token.id,
         client_id: token.client_id,
-        scope: token.scope,
+        scope: token.scope ? token.scope.split(',') : [],
         created_at: token.created_at,
-        client_name: getClientDisplayName(token.client_id)
+        client_name: getClientDisplayName(token.client_id),
+        last_used_at: null,
+        is_revoked: false
       }));
 
       setConnectedApps(appsWithNames);
