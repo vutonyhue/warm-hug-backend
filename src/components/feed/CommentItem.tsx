@@ -167,7 +167,7 @@ export const CommentItem = ({
           {/* Action buttons */}
           <div className="flex items-center gap-2 px-2 text-xs">
             <CommentReactionButton 
-              commentId={comment.id} 
+              commentId={comment.id}
               onReactionChange={onReplyAdded}
             />
             

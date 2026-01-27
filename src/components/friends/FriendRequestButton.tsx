@@ -21,7 +21,6 @@ export const FriendRequestButton = ({ userId, currentUserId }: FriendRequestButt
   useEffect(() => {
     checkFriendshipStatus();
     
-    // Set up realtime subscription for friendships
     const channel = supabase
       .channel('friendship-status-changes')
       .on(
@@ -30,7 +29,7 @@ export const FriendRequestButton = ({ userId, currentUserId }: FriendRequestButt
           event: '*',
           schema: 'public',
           table: 'friendships',
-          filter: `user_id=eq.${currentUserId},friend_id=eq.${userId}`
+          filter: `requester_id=eq.${currentUserId},addressee_id=eq.${userId}`
         },
         () => {
           checkFriendshipStatus();
@@ -42,7 +41,7 @@ export const FriendRequestButton = ({ userId, currentUserId }: FriendRequestButt
           event: '*',
           schema: 'public',
           table: 'friendships',
-          filter: `user_id=eq.${userId},friend_id=eq.${currentUserId}`
+          filter: `requester_id=eq.${userId},addressee_id=eq.${currentUserId}`
         },
         () => {
           checkFriendshipStatus();
@@ -58,12 +57,11 @@ export const FriendRequestButton = ({ userId, currentUserId }: FriendRequestButt
   const checkFriendshipStatus = async () => {
     const { data, error } = await supabase
       .from("friendships")
-      .select("id, user_id, friend_id, status")
-      .or(`and(user_id.eq.${currentUserId},friend_id.eq.${userId}),and(user_id.eq.${userId},friend_id.eq.${currentUserId})`)
+      .select("id, requester_id, addressee_id, status")
+      .or(`and(requester_id.eq.${currentUserId},addressee_id.eq.${userId}),and(requester_id.eq.${userId},addressee_id.eq.${currentUserId})`)
       .maybeSingle();
 
     if (error) {
-      // Error checking friendship - silent fail
       return;
     }
 
@@ -74,7 +72,7 @@ export const FriendRequestButton = ({ userId, currentUserId }: FriendRequestButt
       setFriendshipId(data.id);
       if (data.status === "accepted") {
         setStatus("accepted");
-      } else if (data.user_id === currentUserId) {
+      } else if (data.requester_id === currentUserId) {
         setStatus("pending_sent");
       } else {
         setStatus("pending_received");
@@ -83,7 +81,6 @@ export const FriendRequestButton = ({ userId, currentUserId }: FriendRequestButt
   };
 
   const sendFriendRequest = async () => {
-    // Guest check - show login prompt
     if (!currentUserId) {
       toast.error('Vui lòng đăng nhập để kết bạn', {
         action: { label: 'Đăng nhập', onClick: () => navigate('/auth') }
@@ -95,8 +92,8 @@ export const FriendRequestButton = ({ userId, currentUserId }: FriendRequestButt
     const { error } = await supabase
       .from("friendships")
       .insert({
-        user_id: currentUserId,
-        friend_id: userId,
+        requester_id: currentUserId,
+        addressee_id: userId,
         status: "pending"
       });
 

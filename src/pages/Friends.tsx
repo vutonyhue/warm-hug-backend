@@ -54,7 +54,7 @@ const Friends = () => {
     const { data } = await supabase
       .from('friendships')
       .select('*')
-      .eq('friend_id', userId)
+      .eq('addressee_id', userId)
       .eq('status', 'pending');
     
     if (!data?.length) {
@@ -62,16 +62,16 @@ const Friends = () => {
       return;
     }
 
-    const userIds = data.map(f => f.user_id);
+    const userIds = data.map(f => f.requester_id);
     const { data: profilesData } = await supabase
       .from('profiles')
       .select('id, username, full_name, avatar_url')
       .in('id', userIds);
     
     const formatted = data.map(item => {
-      const profile = profilesData?.find(p => p.id === item.user_id);
+      const profile = profilesData?.find(p => p.id === item.requester_id);
       return {
-        id: profile?.id || item.user_id,
+        id: profile?.id || item.requester_id,
         username: profile?.username || 'Unknown',
         full_name: profile?.full_name,
         avatar_url: profile?.avatar_url,
@@ -87,7 +87,7 @@ const Friends = () => {
     const { data } = await supabase
       .from('friendships')
       .select('*')
-      .eq('user_id', userId)
+      .eq('requester_id', userId)
       .eq('status', 'pending');
     
     if (!data?.length) {
@@ -95,16 +95,16 @@ const Friends = () => {
       return;
     }
 
-    const friendIds = data.map(f => f.friend_id);
+    const friendIds = data.map(f => f.addressee_id);
     const { data: profilesData } = await supabase
       .from('profiles')
       .select('id, username, full_name, avatar_url')
       .in('id', friendIds);
     
     const formatted = data.map(item => {
-      const profile = profilesData?.find(p => p.id === item.friend_id);
+      const profile = profilesData?.find(p => p.id === item.addressee_id);
       return {
-        id: profile?.id || item.friend_id,
+        id: profile?.id || item.addressee_id,
         username: profile?.username || 'Unknown',
         full_name: profile?.full_name,
         avatar_url: profile?.avatar_url,
@@ -119,13 +119,13 @@ const Friends = () => {
   const fetchSuggestions = async (userId: string) => {
     const { data: existingRelations } = await supabase
       .from('friendships')
-      .select('user_id, friend_id')
-      .or(`user_id.eq.${userId},friend_id.eq.${userId}`);
+      .select('requester_id, addressee_id')
+      .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`);
 
     const excludedUserIds = new Set([userId]);
     existingRelations?.forEach(rel => {
-      excludedUserIds.add(rel.user_id);
-      excludedUserIds.add(rel.friend_id);
+      excludedUserIds.add(rel.requester_id);
+      excludedUserIds.add(rel.addressee_id);
     });
 
     const { data } = await supabase
@@ -177,8 +177,8 @@ const Friends = () => {
       const { error } = await supabase
         .from('friendships')
         .insert({
-          user_id: currentUserId,
-          friend_id: id,
+          requester_id: currentUserId,
+          addressee_id: id,
           status: 'pending'
         });
       if (!error) {

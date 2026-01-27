@@ -58,36 +58,38 @@ export const ReactionViewerDialog = ({
   const fetchReactionUsers = async () => {
     setLoading(true);
     try {
+      // Fetch reactions
       let query = supabase
         .from('reactions')
-        .select(`
-          type,
-          user_id,
-          profiles:user_id (
-            id,
-            username,
-            avatar_url,
-            full_name
-          )
-        `)
-        .eq('post_id', postId)
-        .is('comment_id', null);
+        .select('reaction_type, user_id')
+        .eq('post_id', postId);
 
       if (selectedType) {
-        query = query.eq('type', selectedType);
+        query = query.eq('reaction_type', selectedType);
       }
 
-      const { data, error } = await query.limit(50);
-
+      const { data: reactionsData, error } = await query.limit(50);
       if (error) throw error;
 
-      const formattedUsers: ReactionUser[] = (data || []).map((item: any) => ({
-        id: item.profiles?.id || item.user_id,
-        username: item.profiles?.username || 'Unknown',
-        avatar_url: item.profiles?.avatar_url,
-        full_name: item.profiles?.full_name,
-        type: item.type,
-      }));
+      // Fetch profiles for reaction users
+      const userIds = [...new Set((reactionsData || []).map(r => r.user_id))];
+      const { data: profilesData } = await supabase
+        .from('profiles')
+        .select('id, username, avatar_url, full_name')
+        .in('id', userIds);
+
+      const profilesMap = new Map(profilesData?.map(p => [p.id, p]) || []);
+
+      const formattedUsers: ReactionUser[] = (reactionsData || []).map((item) => {
+        const profile = profilesMap.get(item.user_id);
+        return {
+          id: profile?.id || item.user_id,
+          username: profile?.username || 'Unknown',
+          avatar_url: profile?.avatar_url || null,
+          full_name: profile?.full_name || null,
+          type: item.reaction_type,
+        };
+      });
 
       setUsers(formattedUsers);
     } catch (error) {

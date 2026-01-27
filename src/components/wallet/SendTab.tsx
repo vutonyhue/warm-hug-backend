@@ -53,12 +53,15 @@ export const SendTab = () => {
               await supabase.from('transactions').insert({
                 user_id: user.id,
                 tx_hash: hash,
-                from_address: address,
-                to_address: recipient,
-                amount: amount,
+                amount: parseFloat(amount),
                 token_symbol: nativeToken,
-                chain_id: chainId,
-                status: 'pending'
+                type: 'send',
+                status: 'pending',
+                metadata: {
+                  from_address: address,
+                  to_address: recipient,
+                  chain_id: chainId
+                }
               });
             }
             

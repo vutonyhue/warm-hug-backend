@@ -8,16 +8,13 @@ import { cn } from '@/lib/utils';
 
 interface CommentReactionButtonProps {
   commentId: string;
-  postId: string;
   initialReactionCount?: number;
   onReactionChange?: () => void;
 }
 
-// Since reactions table doesn't support comment_id, we use a simple like counter approach
-// This is a simplified version until comment reactions are properly implemented in database
+// Simplified like counter using localStorage until comment reactions are in database
 export const CommentReactionButton = ({
   commentId,
-  postId,
   initialReactionCount = 0,
   onReactionChange
 }: CommentReactionButtonProps) => {
@@ -26,7 +23,6 @@ export const CommentReactionButton = ({
   const [likeCount, setLikeCount] = useState(initialReactionCount);
   const [loading, setLoading] = useState(false);
 
-  // Check if current user has liked (stored in localStorage for now)
   useEffect(() => {
     const checkLiked = async () => {
       const { data: { user } } = await supabase.auth.getUser();
@@ -47,13 +43,10 @@ export const CommentReactionButton = ({
     }
 
     setLoading(true);
-
-    // Toggle like state
     const newLiked = !liked;
     setLiked(newLiked);
     setLikeCount(prev => newLiked ? prev + 1 : Math.max(0, prev - 1));
 
-    // Store in localStorage (temporary solution)
     const likedComments = JSON.parse(localStorage.getItem('liked_comments') || '{}');
     if (newLiked) {
       likedComments[commentId] = true;

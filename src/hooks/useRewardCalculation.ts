@@ -71,26 +71,38 @@ export const calculateReward = (
  * Fetch reward stats for a user - uses RPC function V2 with daily limits
  */
 const fetchRewardStats = async (userId: string): Promise<UserRewardStats> => {
-  // Use RPC function V2 with daily limits
-  const [userRewardsRes, claimsRes] = await Promise.all([
-    supabase.rpc('get_user_rewards_v2', { limit_count: 10000 }),
-    supabase
-      .from('reward_claims')
-      .select('amount')
+  // Fetch all required data in parallel
+  const [postsRes, reactionsRes, commentsRes, sharesRes, friendsRes, livestreamsRes, claimsRes] = await Promise.all([
+    supabase.from('posts').select('id').eq('user_id', userId),
+    supabase.from('reactions').select('post_id').in('post_id', 
+      (await supabase.from('posts').select('id').eq('user_id', userId)).data?.map(p => p.id) || []
+    ),
+    supabase.from('comments').select('post_id').in('post_id', 
+      (await supabase.from('posts').select('id').eq('user_id', userId)).data?.map(p => p.id) || []
+    ),
+    supabase.from('shared_posts').select('original_post_id').in('original_post_id', 
+      (await supabase.from('posts').select('id').eq('user_id', userId)).data?.map(p => p.id) || []
+    ),
+    supabase.from('friendships').select('id', { count: 'exact', head: true })
+      .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`)
+      .eq('status', 'accepted'),
+    supabase.from('livestreams').select('id', { count: 'exact', head: true })
       .eq('user_id', userId)
+      .eq('status', 'completed'),
+    supabase.from('reward_claims').select('amount').eq('user_id', userId)
   ]);
 
-  // Find the current user's data from RPC result
-  const userData = userRewardsRes.data?.find((u: any) => u.id === userId);
+  const postsCount = postsRes.data?.length || 0;
+  const reactionsOnPosts = reactionsRes.data?.length || 0;
+  const commentsOnPosts = commentsRes.data?.length || 0;
+  const sharesCount = sharesRes.data?.length || 0;
+  const friendsCount = friendsRes.count || 0;
+  const livestreamsCount = livestreamsRes.count || 0;
   
-  const postsCount = Number(userData?.posts_count) || 0;
-  const reactionsOnPosts = Number(userData?.reactions_on_posts) || 0;
-  const commentsOnPosts = Number(userData?.comments_count) || 0;
-  const sharesCount = Number(userData?.shares_count) || 0;
-  const friendsCount = Number(userData?.friends_count) || 0;
-  const livestreamsCount = Number(userData?.livestreams_count) || 0;
-  const totalReward = Number(userData?.total_reward) || 0;
-  const todayReward = Number(userData?.today_reward) || 0;
+  const totalReward = calculateReward(
+    postsCount, reactionsOnPosts, commentsOnPosts, sharesCount, friendsCount, livestreamsCount
+  );
+  const todayReward = 0; // TODO: Calculate today's reward if needed
   
   const claimedAmount = claimsRes.data?.reduce((sum, c) => sum + Number(c.amount), 0) || 0;
   const claimableAmount = Math.max(0, totalReward - claimedAmount);

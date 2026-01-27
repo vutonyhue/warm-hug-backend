@@ -26,9 +26,9 @@ export const CoverHonorBoard = ({ userId, username, avatarUrl }: CoverHonorBoard
         .from('transactions')
         .select('amount')
         .eq('user_id', userId)
-        .eq('status', 'success');
+        .eq('status', 'completed');
 
-      const receivedAmount = transactionsData?.reduce((sum, tx) => sum + parseFloat(tx.amount || '0'), 0) || 0;
+      const receivedAmount = transactionsData?.reduce((sum, tx) => sum + Number(tx.amount || 0), 0) || 0;
       return { receivedAmount };
     },
     enabled: !!userId,
@@ -194,9 +194,9 @@ export const MobileStats = ({ userId, username, avatarUrl }: MobileStatsProps) =
         .from('transactions')
         .select('amount')
         .eq('user_id', userId)
-        .eq('status', 'success');
+        .eq('status', 'completed');
 
-      const receivedAmount = transactionsData?.reduce((sum, tx) => sum + parseFloat(tx.amount || '0'), 0) || 0;
+      const receivedAmount = transactionsData?.reduce((sum, tx) => sum + Number(tx.amount || 0), 0) || 0;
       return { receivedAmount };
     },
     enabled: !!userId,

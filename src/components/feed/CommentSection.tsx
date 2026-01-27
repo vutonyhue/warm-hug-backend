@@ -94,12 +94,9 @@ export const CommentSection = ({ postId, onCommentAdded }: CommentSectionProps) 
   const fetchComments = async () => {
     const { data, error } = await supabase
       .from('comments')
-      .select(`
-        *,
-        profiles (username, avatar_url)
-      `)
+      .select('*')
       .eq('post_id', postId)
-      .is('parent_comment_id', null)
+      .is('parent_id', null)
       .order('created_at', { ascending: false });
 
     if (error) {
@@ -107,20 +104,56 @@ export const CommentSection = ({ postId, onCommentAdded }: CommentSectionProps) 
       return;
     }
 
-    const commentsWithReplies = await Promise.all(
+    // Fetch profiles for all comments
+    const userIds = [...new Set((data || []).map(c => c.user_id))];
+    const { data: profilesData } = await supabase
+      .from('profiles')
+      .select('id, username, avatar_url')
+      .in('id', userIds);
+
+    const profilesMap = new Map(profilesData?.map(p => [p.id, p]) || []);
+
+    const commentsWithReplies: Comment[] = await Promise.all(
       (data || []).map(async (comment) => {
         const { data: replies } = await supabase
           .from('comments')
-          .select(`
-            *,
-            profiles (username, avatar_url)
-          `)
-          .eq('parent_comment_id', comment.id)
+          .select('*')
+          .eq('parent_id', comment.id)
           .order('created_at', { ascending: true });
 
+        // Get profiles for replies
+        const replyUserIds = [...new Set((replies || []).map(r => r.user_id))];
+        const newUserIds = replyUserIds.filter(id => !profilesMap.has(id));
+        
+        if (newUserIds.length > 0) {
+          const { data: replyProfiles } = await supabase
+            .from('profiles')
+            .select('id, username, avatar_url')
+            .in('id', newUserIds);
+          replyProfiles?.forEach(p => profilesMap.set(p.id, p));
+        }
+
+        const formattedReplies: Comment[] = (replies || []).map(reply => ({
+          id: reply.id,
+          content: reply.content,
+          created_at: reply.created_at,
+          user_id: reply.user_id,
+          image_url: reply.media_type === 'image' ? reply.media_url : null,
+          video_url: reply.media_type === 'video' ? reply.media_url : null,
+          parent_comment_id: reply.parent_id,
+          profiles: profilesMap.get(reply.user_id) || { username: 'Unknown', avatar_url: null }
+        }));
+
         return {
-          ...comment,
-          replies: replies || [],
+          id: comment.id,
+          content: comment.content,
+          created_at: comment.created_at,
+          user_id: comment.user_id,
+          image_url: comment.media_type === 'image' ? comment.media_url : null,
+          video_url: comment.media_type === 'video' ? comment.media_url : null,
+          parent_comment_id: comment.parent_id,
+          profiles: profilesMap.get(comment.user_id) || { username: 'Unknown', avatar_url: null },
+          replies: formattedReplies,
         };
       })
     );

@@ -6,7 +6,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { UserMinus, UserCheck, X, UserPlus, MoreHorizontal, MessageCircle } from "lucide-react";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
-import { LazyImage } from "@/components/ui/LazyImage";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -68,7 +67,7 @@ export const FriendsList = ({ userId }: FriendsListProps) => {
       .from("friendships")
       .select("*")
       .eq("status", "accepted")
-      .or(`user_id.eq.${userId},friend_id.eq.${userId}`);
+      .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`);
 
     if (error || !data) {
       setFriends([]);
@@ -77,7 +76,7 @@ export const FriendsList = ({ userId }: FriendsListProps) => {
     }
 
     const userIds = data.map(f => 
-      f.user_id === userId ? f.friend_id : f.user_id
+      f.requester_id === userId ? f.addressee_id : f.requester_id
     );
 
     const { data: profilesData } = await supabase
@@ -86,7 +85,7 @@ export const FriendsList = ({ userId }: FriendsListProps) => {
       .in("id", userIds);
 
     const friendsList: Friend[] = data.map(friendship => {
-      const friendId = friendship.user_id === userId ? friendship.friend_id : friendship.user_id;
+      const friendId = friendship.requester_id === userId ? friendship.addressee_id : friendship.requester_id;
       const profile = profilesData?.find(p => p.id === friendId);
       
       return {
@@ -107,23 +106,23 @@ export const FriendsList = ({ userId }: FriendsListProps) => {
       .from("friendships")
       .select("*")
       .eq("status", "pending")
-      .eq("friend_id", userId);
+      .eq("addressee_id", userId);
 
     if (error || !data?.length) {
       setPendingRequests([]);
       return;
     }
 
-    const userIds = data.map(f => f.user_id);
+    const userIds = data.map(f => f.requester_id);
     const { data: profilesData } = await supabase
       .from("profiles")
       .select("id, username, full_name, avatar_url")
       .in("id", userIds);
 
     const requests: Friend[] = data.map(friendship => {
-      const profile = profilesData?.find(p => p.id === friendship.user_id);
+      const profile = profilesData?.find(p => p.id === friendship.requester_id);
       return {
-        id: profile?.id || friendship.user_id,
+        id: profile?.id || friendship.requester_id,
         username: profile?.username || "Unknown",
         full_name: profile?.full_name || "",
         avatar_url: profile?.avatar_url || "",
@@ -139,23 +138,23 @@ export const FriendsList = ({ userId }: FriendsListProps) => {
       .from("friendships")
       .select("*")
       .eq("status", "pending")
-      .eq("user_id", userId);
+      .eq("requester_id", userId);
 
     if (error || !data?.length) {
       setSentRequests([]);
       return;
     }
 
-    const friendIds = data.map(f => f.friend_id);
+    const friendIds = data.map(f => f.addressee_id);
     const { data: profilesData } = await supabase
       .from("profiles")
       .select("id, username, full_name, avatar_url")
       .in("id", friendIds);
 
     const requests: Friend[] = data.map(friendship => {
-      const profile = profilesData?.find(p => p.id === friendship.friend_id);
+      const profile = profilesData?.find(p => p.id === friendship.addressee_id);
       return {
-        id: profile?.id || friendship.friend_id,
+        id: profile?.id || friendship.addressee_id,
         username: profile?.username || "Unknown",
         full_name: profile?.full_name || "",
         avatar_url: profile?.avatar_url || "",
@@ -169,13 +168,13 @@ export const FriendsList = ({ userId }: FriendsListProps) => {
   const fetchSuggestions = async () => {
     const { data: existingRelations } = await supabase
       .from("friendships")
-      .select("user_id, friend_id")
-      .or(`user_id.eq.${userId},friend_id.eq.${userId}`);
+      .select("requester_id, addressee_id")
+      .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`);
 
     const excludedUserIds = new Set([userId]);
     existingRelations?.forEach(rel => {
-      excludedUserIds.add(rel.user_id);
-      excludedUserIds.add(rel.friend_id);
+      excludedUserIds.add(rel.requester_id);
+      excludedUserIds.add(rel.addressee_id);
     });
 
     const { data: profilesData } = await supabase
@@ -256,8 +255,8 @@ export const FriendsList = ({ userId }: FriendsListProps) => {
     const { error } = await supabase
       .from("friendships")
       .insert({
-        user_id: userId,
-        friend_id: targetUserId,
+        requester_id: userId,
+        addressee_id: targetUserId,
         status: "pending"
       });
 
@@ -270,7 +269,6 @@ export const FriendsList = ({ userId }: FriendsListProps) => {
     }
   };
 
-  // Mobile-first Friend Item Component
   const FriendItem = ({ 
     friend, 
     actions 
@@ -279,7 +277,6 @@ export const FriendsList = ({ userId }: FriendsListProps) => {
     actions: React.ReactNode;
   }) => (
     <div className="flex items-center gap-3 p-3 rounded-full border border-transparent hover:bg-white hover:shadow-[0_0_12px_rgba(34,197,94,0.5)] hover:border-[#C9A84C]/40 transition-all duration-300">
-      {/* Avatar - shrink-0 prevents squishing */}
       <Avatar 
         className="w-12 h-12 shrink-0 cursor-pointer"
         onClick={() => navigate(`/profile/${friend.id}`)}
@@ -292,7 +289,6 @@ export const FriendsList = ({ userId }: FriendsListProps) => {
         </AvatarFallback>
       </Avatar>
       
-      {/* Info - min-w-0 + truncate prevents overflow */}
       <div 
         className="flex-1 min-w-0 cursor-pointer"
         onClick={() => navigate(`/profile/${friend.id}`)}
@@ -305,7 +301,6 @@ export const FriendsList = ({ userId }: FriendsListProps) => {
         </p>
       </div>
       
-      {/* Actions - shrink-0 keeps buttons visible */}
       <div className="shrink-0 flex items-center gap-1">
         {actions}
       </div>
@@ -315,7 +310,6 @@ export const FriendsList = ({ userId }: FriendsListProps) => {
   return (
     <div className="p-2 sm:p-4">
       <Tabs defaultValue="friends" className="w-full">
-        {/* Scrollable tabs on mobile */}
         <TabsList className="w-full h-auto flex-wrap gap-1 bg-transparent p-0 mb-4">
           <TabsTrigger 
             value="friends" 
@@ -343,7 +337,6 @@ export const FriendsList = ({ userId }: FriendsListProps) => {
           </TabsTrigger>
         </TabsList>
 
-        {/* Friends Tab */}
         <TabsContent value="friends" className="mt-0">
           <div className="max-h-[60vh] overflow-y-auto">
             {friends.length === 0 ? (
@@ -383,7 +376,6 @@ export const FriendsList = ({ userId }: FriendsListProps) => {
           </div>
         </TabsContent>
 
-        {/* Pending Requests Tab */}
         <TabsContent value="requests" className="mt-0">
           <div className="max-h-[60vh] overflow-y-auto">
             {pendingRequests.length === 0 ? (
@@ -420,7 +412,6 @@ export const FriendsList = ({ userId }: FriendsListProps) => {
           </div>
         </TabsContent>
 
-        {/* Sent Requests Tab */}
         <TabsContent value="sent" className="mt-0">
           <div className="max-h-[60vh] overflow-y-auto">
             {sentRequests.length === 0 ? (
@@ -448,7 +439,6 @@ export const FriendsList = ({ userId }: FriendsListProps) => {
           </div>
         </TabsContent>
 
-        {/* Suggestions Tab */}
         <TabsContent value="suggestions" className="mt-0">
           <div className="max-h-[60vh] overflow-y-auto">
             {suggestions.length === 0 ? (
