@@ -313,6 +313,13 @@ export type Database = {
             referencedRelation: "oauth_clients"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "cross_platform_tokens_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "oauth_clients_public"
+            referencedColumns: ["id"]
+          },
         ]
       }
       custodial_wallets: {
@@ -379,6 +386,13 @@ export type Database = {
             columns: ["client_id"]
             isOneToOne: false
             referencedRelation: "oauth_clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "financial_transactions_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "oauth_clients_public"
             referencedColumns: ["id"]
           },
         ]
@@ -708,6 +722,13 @@ export type Database = {
             referencedRelation: "oauth_clients"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "oauth_codes_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "oauth_clients_public"
+            referencedColumns: ["id"]
+          },
         ]
       }
       otp_codes: {
@@ -773,6 +794,13 @@ export type Database = {
             referencedRelation: "oauth_clients"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "pending_provisions_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "oauth_clients_public"
+            referencedColumns: ["id"]
+          },
         ]
       }
       platform_financial_data: {
@@ -823,6 +851,13 @@ export type Database = {
             referencedRelation: "oauth_clients"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "platform_financial_data_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "oauth_clients_public"
+            referencedColumns: ["id"]
+          },
         ]
       }
       platform_user_data: {
@@ -856,6 +891,13 @@ export type Database = {
             columns: ["client_id"]
             isOneToOne: false
             referencedRelation: "oauth_clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "platform_user_data_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "oauth_clients_public"
             referencedColumns: ["id"]
           },
         ]
@@ -1148,6 +1190,13 @@ export type Database = {
             referencedRelation: "oauth_clients"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "reconciliation_logs_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "oauth_clients_public"
+            referencedColumns: ["id"]
+          },
         ]
       }
       reward_adjustments: {
@@ -1391,6 +1440,33 @@ export type Database = {
       }
     }
     Views: {
+      oauth_clients_public: {
+        Row: {
+          allowed_scopes: string[] | null
+          created_at: string | null
+          id: string | null
+          is_active: boolean | null
+          name: string | null
+          redirect_uris: string[] | null
+        }
+        Insert: {
+          allowed_scopes?: string[] | null
+          created_at?: string | null
+          id?: string | null
+          is_active?: boolean | null
+          name?: string | null
+          redirect_uris?: string[] | null
+        }
+        Update: {
+          allowed_scopes?: string[] | null
+          created_at?: string | null
+          id?: string | null
+          is_active?: boolean | null
+          name?: string | null
+          redirect_uris?: string[] | null
+        }
+        Relationships: []
+      }
       public_profiles: {
         Row: {
           avatar_url: string | null
@@ -1426,6 +1502,53 @@ export type Database = {
           username?: string | null
         }
         Relationships: []
+      }
+      safe_public_profiles: {
+        Row: {
+          avatar_url: string | null
+          bio: string | null
+          cover_url: string | null
+          created_at: string | null
+          full_name: string | null
+          fun_id: string | null
+          id: string | null
+          pinned_post_id: string | null
+          soul_level: number | null
+          username: string | null
+        }
+        Insert: {
+          avatar_url?: string | null
+          bio?: string | null
+          cover_url?: string | null
+          created_at?: string | null
+          full_name?: string | null
+          fun_id?: string | null
+          id?: string | null
+          pinned_post_id?: string | null
+          soul_level?: number | null
+          username?: string | null
+        }
+        Update: {
+          avatar_url?: string | null
+          bio?: string | null
+          cover_url?: string | null
+          created_at?: string | null
+          full_name?: string | null
+          fun_id?: string | null
+          id?: string | null
+          pinned_post_id?: string | null
+          soul_level?: number | null
+          username?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fk_pinned_post"
+            columns: ["pinned_post_id"]
+            isOneToOne: false
+            referencedRelation: "posts"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       user_custodial_wallets: {
         Row: {

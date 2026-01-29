@@ -22,6 +22,32 @@ export interface FeedPost {
   };
 }
 
+interface APIFeedPost {
+  id: string;
+  content: string | null;
+  image_url: string | null;
+  video_url: string | null;
+  media_urls: any;
+  created_at: string | null;
+  user_id: string;
+  profiles: {
+    username: string;
+    avatar_url: string | null;
+  };
+  stats: {
+    reactions: { id: string; user_id: string; type: string }[];
+    comment_count: number;
+    share_count: number;
+  };
+}
+
+interface APIResponse {
+  data: APIFeedPost[];
+  next_cursor: string | null;
+  has_more: boolean;
+  error?: string;
+}
+
 interface FeedPage {
   posts: FeedPost[];
   postStats: Record<string, PostStats>;
@@ -30,101 +56,82 @@ interface FeedPage {
 
 const POSTS_PER_PAGE = 10;
 
-// Batch fetch all post stats in parallel
-const fetchPostStats = async (postIds: string[]): Promise<Record<string, PostStats>> => {
-  if (postIds.length === 0) return {};
-
-  try {
-    const [reactionsRes, commentsRes, sharesRes] = await Promise.all([
-      supabase
-        .from('reactions')
-        .select('id, user_id, reaction_type, post_id')
-        .in('post_id', postIds),
-      supabase
-        .from('comments')
-        .select('post_id')
-        .in('post_id', postIds),
-      supabase
-        .from('shared_posts')
-        .select('original_post_id')
-        .in('original_post_id', postIds),
-    ]);
-
-    if (reactionsRes.error) console.error('Reactions fetch error:', reactionsRes.error);
-    if (commentsRes.error) console.error('Comments fetch error:', commentsRes.error);
-    if (sharesRes.error) console.error('Shares fetch error:', sharesRes.error);
-
-    const stats: Record<string, PostStats> = {};
-
-    postIds.forEach(postId => {
-      const postReactions = reactionsRes.data?.filter(r => r.post_id === postId) || [];
-      const postComments = commentsRes.data?.filter(c => c.post_id === postId) || [];
-      const postShares = sharesRes.data?.filter(s => s.original_post_id === postId) || [];
-
-      stats[postId] = {
-        reactions: postReactions.map(r => ({ id: r.id, user_id: r.user_id, type: r.reaction_type })),
-        commentCount: postComments.length,
-        shareCount: postShares.length,
-      };
-    });
-
-    return stats;
-  } catch (error) {
-    console.error('Error fetching post stats:', error);
-    return postIds.reduce((acc, id) => {
-      acc[id] = { reactions: [], commentCount: 0, shareCount: 0 };
-      return acc;
-    }, {} as Record<string, PostStats>);
-  }
-};
-
-// Fetch a page of posts with cursor-based pagination
+// Fetch a page of posts via API Layer (Edge Function)
 const fetchFeedPage = async (cursor: string | null): Promise<FeedPage> => {
-  let query = supabase
-    .from('posts')
-    .select('*')
-    .order('created_at', { ascending: false })
-    .limit(POSTS_PER_PAGE + 1);
-
-  if (cursor) {
-    query = query.lt('created_at', cursor);
+  // Get current session for auth header
+  const { data: { session } } = await supabase.auth.getSession();
+  
+  if (!session?.access_token) {
+    throw new Error('Not authenticated');
   }
 
-  const { data: posts, error } = await query;
+  // Build URL with query params
+  const params = new URLSearchParams({
+    limit: POSTS_PER_PAGE.toString(),
+  });
+  if (cursor) {
+    params.set('cursor', cursor);
+  }
 
-  if (error) throw error;
+  const { data, error } = await supabase.functions.invoke<APIResponse>('api-feed', {
+    method: 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: null,
+  });
 
-  const hasMore = (posts?.length || 0) > POSTS_PER_PAGE;
-  const postsToReturn = hasMore ? posts?.slice(0, POSTS_PER_PAGE) : posts;
+  // Handle invoke with query params - use fetch directly for GET with params
+  const response = await fetch(
+    `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/api-feed?${params.toString()}`,
+    {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${session.access_token}`,
+        'Content-Type': 'application/json',
+        'apikey': import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+      },
+    }
+  );
 
-  // Fetch profiles for all posts
-  const userIds = [...new Set((postsToReturn || []).map(p => p.user_id))];
-  const { data: profilesData } = await supabase
-    .from('profiles')
-    .select('id, username, avatar_url')
-    .in('id', userIds);
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+    throw new Error(errorData.error || `HTTP ${response.status}`);
+  }
 
-  const profilesMap = new Map(profilesData?.map(p => [p.id, p]) || []);
+  const apiResponse: APIResponse = await response.json();
 
-  const postsData: FeedPost[] = (postsToReturn || []).map(post => ({
+  if (apiResponse.error) {
+    throw new Error(apiResponse.error);
+  }
+
+  // Transform API response to match existing FeedPage structure
+  const posts: FeedPost[] = (apiResponse.data || []).map((post) => ({
     id: post.id,
-    content: post.content,
+    content: post.content || '',
     image_url: post.image_url,
     video_url: post.video_url,
-    media_urls: (post.media_urls as Array<{ url: string; type: 'image' | 'video' }>) || null,
-    created_at: post.created_at,
+    media_urls: post.media_urls as Array<{ url: string; type: 'image' | 'video' }> | null,
+    created_at: post.created_at || new Date().toISOString(),
     user_id: post.user_id,
-    profiles: profilesMap.get(post.user_id) || { username: 'Unknown', avatar_url: null },
+    profiles: post.profiles,
   }));
-  
-  const postIds = postsData.map(p => p.id);
-  const postStats = await fetchPostStats(postIds);
 
-  const nextCursor = hasMore && postsData.length > 0 
-    ? postsData[postsData.length - 1].created_at 
-    : null;
+  // Build postStats from API response
+  const postStats: Record<string, PostStats> = {};
+  (apiResponse.data || []).forEach((post) => {
+    postStats[post.id] = {
+      reactions: post.stats.reactions,
+      commentCount: post.stats.comment_count,
+      shareCount: post.stats.share_count,
+    };
+  });
 
-  return { posts: postsData, postStats, nextCursor };
+  return {
+    posts,
+    postStats,
+    nextCursor: apiResponse.next_cursor,
+  };
 };
 
 export const useFeedPosts = () => {
