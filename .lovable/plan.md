@@ -1,98 +1,112 @@
 
+# Kế hoạch: Sửa CORS Headers cho tất cả Edge Functions
 
-# Kế hoạch: Cấu hình CORS cho Cloudflare R2 Bucket
+## Vấn đề gốc
 
-## Vấn đề
+Supabase JavaScript client (v2.93.1) tự động gửi các headers mới:
+- `x-supabase-client-platform` (ví dụ: "Windows")
+- `x-supabase-client-platform-version`
+- `x-supabase-client-runtime`
+- `x-supabase-client-runtime-version`
 
-Frontend đang upload trực tiếp lên R2 bằng presigned URL nhưng R2 bucket chưa cấu hình **CORS policy** để cho phép các request từ domain Lovable.
-
-## Giải pháp: Cấu hình CORS trong Cloudflare Dashboard
-
-### Bước 1: Truy cập Cloudflare R2
-
-1. Đăng nhập **Cloudflare Dashboard**: https://dash.cloudflare.com
-2. Chọn account của con
-3. Vào **R2 Object Storage** (menu bên trái)
-4. Click vào bucket **fun-media**
-
-### Bước 2: Mở CORS Settings
-
-1. Trong bucket, chọn tab **Settings**
-2. Tìm mục **CORS Policy** (hoặc **CORS configuration**)
-3. Click **Edit** hoặc **Add CORS rule**
-
-### Bước 3: Thêm CORS Rule
-
-Thêm CORS policy sau đây (JSON format):
-
-```json
-[
-  {
-    "AllowedOrigins": [
-      "https://id-preview--ad0a5c4b-26ce-4e7c-acae-c271bc53e283.lovable.app",
-      "https://trienkhaifunprofile.lovable.app",
-      "https://*.lovableproject.com",
-      "https://*.lovable.app",
-      "http://localhost:*"
-    ],
-    "AllowedMethods": [
-      "GET",
-      "PUT",
-      "POST",
-      "DELETE",
-      "HEAD"
-    ],
-    "AllowedHeaders": [
-      "*"
-    ],
-    "ExposeHeaders": [
-      "ETag",
-      "Content-Length",
-      "Content-Type"
-    ],
-    "MaxAgeSeconds": 3600
-  }
-]
+Nhưng tất cả Edge Functions chỉ cho phép:
+```
+authorization, x-client-info, apikey, content-type
 ```
 
-### Bước 4: Lưu và test
+**Kết quả**: Browser chặn request do CORS policy violation khi preflight check thất bại.
 
-1. Click **Save** để lưu CORS configuration
-2. Quay lại ứng dụng và thử đăng bài với ảnh
+## Giải pháp
 
-## Giải thích cấu hình
+Cập nhật CORS headers trong **tất cả Edge Functions** để bao gồm các headers mới từ Supabase client.
 
-| Field | Ý nghĩa |
-|-------|---------|
-| `AllowedOrigins` | Các domain được phép gọi đến R2 (bao gồm preview, published, localhost) |
-| `AllowedMethods` | PUT (upload), GET (download), DELETE (xóa) |
-| `AllowedHeaders` | Cho phép mọi header (như `Content-Type`) |
-| `ExposeHeaders` | Headers trả về cho client |
-| `MaxAgeSeconds` | Cache preflight response 1 giờ |
+## Danh sách files cần sửa
 
-## Sau khi cấu hình xong
+| # | File | CORS cần sửa |
+|---|------|--------------|
+| 1 | `supabase/functions/sso-authorize/index.ts` | Line 4-6 |
+| 2 | `supabase/functions/sso-token/index.ts` | Line 4-6 |
+| 3 | `supabase/functions/sso-verify/index.ts` | Line 4-6 |
+| 4 | `supabase/functions/sso-refresh/index.ts` | Line 4-6 |
+| 5 | `supabase/functions/sso-revoke/index.ts` | Line 4-6 |
+| 6 | `supabase/functions/sso-otp-request/index.ts` | Line 4-6 |
+| 7 | `supabase/functions/sso-otp-verify/index.ts` | Line 4-6 |
+| 8 | `supabase/functions/sso-register/index.ts` | Line 4-6 |
+| 9 | `supabase/functions/sso-web3-auth/index.ts` | Line 4-6 |
+| 10 | `supabase/functions/sso-set-password/index.ts` | Line 4-6 |
+| 11 | `supabase/functions/sso-sync-data/index.ts` | Line 4-6 |
+| 12 | `supabase/functions/sso-sync-financial/index.ts` | Line 4-6 |
+| 13 | `supabase/functions/sso-merge-request/index.ts` | Line 4-6 |
+| 14 | `supabase/functions/sso-merge-approve/index.ts` | Line 4-6 |
+| 15 | `supabase/functions/sso-resend-webhook/index.ts` | Line 4-6 |
+| 16 | `supabase/functions/stream-video/index.ts` | Line 4-8 |
+| 17 | `supabase/functions/get-upload-url/index.ts` | Line 12-14 |
+| 18 | `supabase/functions/upload-to-r2/index.ts` | Line 3-6 |
+| 19 | `supabase/functions/delete-from-r2/index.ts` | Line cần tìm |
+| 20 | `supabase/functions/api-feed/index.ts` | Line cần tìm |
+| 21 | `supabase/functions/api-leaderboard/index.ts` | Line cần tìm |
+| 22 | `supabase/functions/create-post/index.ts` | Line cần tìm |
+| 23 | `supabase/functions/admin-list-merge-requests/index.ts` | Line cần tìm |
+| 24 | `supabase/functions/admin-update-media-url/index.ts` | Line cần tìm |
+| 25 | `supabase/functions/connect-external-wallet/index.ts` | Line cần tìm |
+| 26 | `supabase/functions/create-custodial-wallet/index.ts` | Line cần tìm |
+| 27 | `supabase/functions/delete-user-account/index.ts` | Line cần tìm |
+| 28 | `supabase/functions/generate-presigned-url/index.ts` | Line cần tìm |
+| 29 | `supabase/functions/image-transform/index.ts` | Line cần tìm |
+| 30 | `supabase/functions/mint-soul-nft/index.ts` | Line cần tìm |
+| Các functions còn lại | Các edge functions khác trong thư mục | Tương tự |
 
-Upload flow sẽ hoạt động như sau:
+## Thay đổi cụ thể
 
-```text
-1. Frontend chọn ảnh
-2. Gọi get-upload-url để lấy presigned URL ✅ (đang OK)
-3. Browser gửi preflight OPTIONS request đến R2
-4. R2 trả về CORS headers ✅ (sau khi cấu hình)
-5. Browser cho phép PUT request
-6. File được upload thành công ✅
+**TRƯỚC (sai):**
+```typescript
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+};
 ```
 
-## Nếu không tìm thấy CORS Settings
+**SAU (đúng):**
+```typescript
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
+};
+```
 
-Một số R2 bucket cũ có thể cần:
-1. Vào **R2 Overview** → **Manage R2 API Tokens**
-2. Hoặc dùng **wrangler CLI** để set CORS
+## Kế hoạch triển khai
 
-## Files không cần thay đổi
+### Bước 1: Cập nhật tất cả SSO functions (ưu tiên cao)
+- sso-authorize, sso-token, sso-verify, sso-refresh, sso-revoke
+- sso-otp-request, sso-otp-verify, sso-register
+- sso-web3-auth, sso-set-password
+- sso-sync-data, sso-sync-financial
+- sso-merge-request, sso-merge-approve, sso-resend-webhook
 
-Không cần sửa code vì:
-- `get-upload-url` Edge Function đã hoạt động tốt (trả về presigned URL)
-- `r2Upload.ts` frontend đã cấu hình đúng
-- Vấn đề hoàn toàn nằm ở cấu hình CORS của R2 bucket
+### Bước 2: Cập nhật Media upload functions
+- stream-video, get-upload-url, upload-to-r2, delete-from-r2
+- generate-presigned-url, image-transform
 
+### Bước 3: Cập nhật API functions
+- api-feed, api-leaderboard, create-post
+
+### Bước 4: Cập nhật Admin & User functions
+- admin-list-merge-requests, admin-update-media-url
+- connect-external-wallet, create-custodial-wallet
+- delete-user-account, mint-soul-nft
+
+### Bước 5: Cập nhật các functions còn lại
+- cleanup functions, migrate functions, etc.
+
+## Kết quả sau khi triển khai
+
+- Không còn lỗi CORS trong browser console
+- Frontend requests thành công
+- Video upload qua Cloudflare Stream vẫn hoạt động bình thường
+- Authentication flows vẫn hoạt động
+
+## Lưu ý
+
+- Cloudflare R2 CORS là vấn đề riêng (đã được xử lý trước đó bằng cách chuyển sang backend upload)
+- Thay đổi này chỉ ảnh hưởng đến Edge Functions, không ảnh hưởng đến Cloudflare CDN
+- Các Edge Functions sẽ được auto-deploy sau khi cập nhật code
