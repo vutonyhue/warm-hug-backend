@@ -1,84 +1,98 @@
 
-# Kế hoạch: Cấu hình Cloudflare R2 Secrets
+
+# Kế hoạch: Cấu hình CORS cho Cloudflare R2 Bucket
 
 ## Vấn đề
 
-Khi đăng bài với ảnh, Edge Function `get-upload-url` (dòng 133-141) cần các biến môi trường sau:
-```typescript
-const accountId = Deno.env.get('CLOUDFLARE_ACCOUNT_ID')!;
-const accessKeyId = Deno.env.get('CLOUDFLARE_ACCESS_KEY_ID')!;
-const secretAccessKey = Deno.env.get('CLOUDFLARE_SECRET_ACCESS_KEY')!;
-const bucketName = Deno.env.get('CLOUDFLARE_R2_BUCKET_NAME')!;
-const publicUrl = Deno.env.get('CLOUDFLARE_R2_PUBLIC_URL')!;
+Frontend đang upload trực tiếp lên R2 bằng presigned URL nhưng R2 bucket chưa cấu hình **CORS policy** để cho phép các request từ domain Lovable.
+
+## Giải pháp: Cấu hình CORS trong Cloudflare Dashboard
+
+### Bước 1: Truy cập Cloudflare R2
+
+1. Đăng nhập **Cloudflare Dashboard**: https://dash.cloudflare.com
+2. Chọn account của con
+3. Vào **R2 Object Storage** (menu bên trái)
+4. Click vào bucket **fun-media**
+
+### Bước 2: Mở CORS Settings
+
+1. Trong bucket, chọn tab **Settings**
+2. Tìm mục **CORS Policy** (hoặc **CORS configuration**)
+3. Click **Edit** hoặc **Add CORS rule**
+
+### Bước 3: Thêm CORS Rule
+
+Thêm CORS policy sau đây (JSON format):
+
+```json
+[
+  {
+    "AllowedOrigins": [
+      "https://id-preview--ad0a5c4b-26ce-4e7c-acae-c271bc53e283.lovable.app",
+      "https://trienkhaifunprofile.lovable.app",
+      "https://*.lovableproject.com",
+      "https://*.lovable.app",
+      "http://localhost:*"
+    ],
+    "AllowedMethods": [
+      "GET",
+      "PUT",
+      "POST",
+      "DELETE",
+      "HEAD"
+    ],
+    "AllowedHeaders": [
+      "*"
+    ],
+    "ExposeHeaders": [
+      "ETag",
+      "Content-Length",
+      "Content-Type"
+    ],
+    "MaxAgeSeconds": 3600
+  }
+]
 ```
 
-**Hiện tại các secrets này CHƯA được cấu hình** trong project.
+### Bước 4: Lưu và test
 
----
+1. Click **Save** để lưu CORS configuration
+2. Quay lại ứng dụng và thử đăng bài với ảnh
 
-## Giải pháp: Con cần cung cấp các thông tin Cloudflare R2
+## Giải thích cấu hình
 
-### Bước 1: Lấy thông tin từ Cloudflare Dashboard
-
-1. Đăng nhập **Cloudflare Dashboard** → **R2**
-2. Lấy các thông tin sau:
-
-| Secret Name | Lấy từ đâu |
-|-------------|------------|
-| `CLOUDFLARE_ACCOUNT_ID` | Dashboard URL: `dash.cloudflare.com/{account_id}/r2` |
-| `CLOUDFLARE_ACCESS_KEY_ID` | R2 → Manage R2 API Tokens → Create API Token → Access Key ID |
-| `CLOUDFLARE_SECRET_ACCESS_KEY` | R2 → Manage R2 API Tokens → Create API Token → Secret Access Key |
-| `CLOUDFLARE_R2_BUCKET_NAME` | Tên bucket đã tạo (vd: `fun-media`) |
-| `CLOUDFLARE_R2_PUBLIC_URL` | R2 → Bucket → Settings → Public Access URL (vd: `https://media.fun.rich`) |
-
-### Bước 2: Thêm secrets vào Lovable
-
-Sau khi con có các giá trị trên, cha sẽ thêm vào bằng công cụ `add_secret`:
-- `CLOUDFLARE_ACCOUNT_ID`: Account ID của Cloudflare
-- `CLOUDFLARE_ACCESS_KEY_ID`: Access Key ID từ R2 API Token
-- `CLOUDFLARE_SECRET_ACCESS_KEY`: Secret Access Key từ R2 API Token
-- `CLOUDFLARE_R2_BUCKET_NAME`: Tên bucket (vd: `fun-media`)
-- `CLOUDFLARE_R2_PUBLIC_URL`: URL công khai bucket (vd: `https://media.fun.rich`)
-
----
-
-## Tạo Cloudflare R2 API Token
-
-Nếu con chưa có API Token:
-
-1. Vào **Cloudflare Dashboard** → **R2**
-2. Click **Manage R2 API Tokens** (góc trên phải)
-3. Click **Create API Token**
-4. Đặt tên: `Fun Profile Upload`
-5. Chọn permissions:
-   - **Object Read & Write** - cho phép upload và đọc files
-6. Chọn bucket: **Apply to specific bucket only** → Chọn bucket của con
-7. Click **Create API Token**
-8. **LƯU LẠI** `Access Key ID` và `Secret Access Key` (chỉ hiện 1 lần!)
-
----
+| Field | Ý nghĩa |
+|-------|---------|
+| `AllowedOrigins` | Các domain được phép gọi đến R2 (bao gồm preview, published, localhost) |
+| `AllowedMethods` | PUT (upload), GET (download), DELETE (xóa) |
+| `AllowedHeaders` | Cho phép mọi header (như `Content-Type`) |
+| `ExposeHeaders` | Headers trả về cho client |
+| `MaxAgeSeconds` | Cache preflight response 1 giờ |
 
 ## Sau khi cấu hình xong
 
 Upload flow sẽ hoạt động như sau:
+
 ```text
-User chọn ảnh
-   → Frontend gọi get-upload-url với auth token
-   → Edge Function tạo presigned URL từ R2
-   → Frontend upload trực tiếp lên R2
-   → URL công khai được trả về (https://media.fun.rich/posts/xxx.jpg)
-   → URL được lưu vào database
+1. Frontend chọn ảnh
+2. Gọi get-upload-url để lấy presigned URL ✅ (đang OK)
+3. Browser gửi preflight OPTIONS request đến R2
+4. R2 trả về CORS headers ✅ (sau khi cấu hình)
+5. Browser cho phép PUT request
+6. File được upload thành công ✅
 ```
 
----
+## Nếu không tìm thấy CORS Settings
 
-## Hành động tiếp theo
+Một số R2 bucket cũ có thể cần:
+1. Vào **R2 Overview** → **Manage R2 API Tokens**
+2. Hoặc dùng **wrangler CLI** để set CORS
 
-**Con cần:**
-1. Mở Cloudflare Dashboard và lấy 5 giá trị trên
-2. Báo cho cha để cha thêm secrets vào project
+## Files không cần thay đổi
 
-**Hoặc nếu con muốn dùng Lovable Cloud Storage thay vì R2:**
-- Cha có thể chuyển sang dùng Supabase Storage (đã tích hợp sẵn với Lovable Cloud)
-- Không cần cấu hình thêm gì
-- Nhưng sẽ cần sửa code upload
+Không cần sửa code vì:
+- `get-upload-url` Edge Function đã hoạt động tốt (trả về presigned URL)
+- `r2Upload.ts` frontend đã cấu hình đúng
+- Vấn đề hoàn toàn nằm ở cấu hình CORS của R2 bucket
+
