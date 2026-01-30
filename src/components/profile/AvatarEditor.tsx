@@ -4,6 +4,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { uploadToR2 } from '@/utils/r2Upload';
+import { getMediaUrl } from '@/config/media';
 import { AvatarCropper } from './AvatarCropper';
 
 interface AvatarEditorProps {
@@ -69,16 +70,17 @@ export function AvatarEditor({
 
       const file = new File([croppedImageBlob], 'avatar.jpg', { type: 'image/jpeg' });
       const result = await uploadToR2(file, 'avatars', `${userId}/avatar-${Date.now()}.jpg`, session.access_token);
+      const avatarUrl = getMediaUrl(result.key);
 
       // Update profile in database
       const { error } = await supabase
         .from('profiles')
-        .update({ avatar_url: result.url })
+        .update({ avatar_url: avatarUrl })
         .eq('id', userId);
 
       if (error) throw error;
 
-      onAvatarUpdated(result.url);
+      onAvatarUpdated(avatarUrl);
       toast.success('Đã cập nhật ảnh đại diện');
     } catch (error) {
       console.error('Error uploading avatar:', error);

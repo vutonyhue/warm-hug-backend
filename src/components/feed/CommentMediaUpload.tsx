@@ -1,6 +1,7 @@
 import { useState, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { uploadToR2 } from '@/utils/r2Upload';
+import { getMediaUrl } from '@/config/media';
 import { Button } from '@/components/ui/button';
 import { Image, Video, X } from 'lucide-react';
 import { toast } from 'sonner';
@@ -73,9 +74,10 @@ export const CommentMediaUpload = ({
       }
 
       const result = await uploadToR2(fileToUpload, 'comment-media', undefined, session.access_token);
+      const mediaUrl = getMediaUrl(result.key);
 
-      setPreview({ url: result.url, type });
-      onMediaUploaded(result.url, type);
+      setPreview({ url: mediaUrl, type });
+      onMediaUploaded(mediaUrl, type);
       toast.success('Media uploaded!');
     } catch (error) {
       console.error('Upload error:', error);

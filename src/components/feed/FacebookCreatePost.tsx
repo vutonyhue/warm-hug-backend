@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { z } from 'zod';
 import { supabase } from '@/integrations/supabase/client';
 import { uploadToR2 } from '@/utils/r2Upload';
+import { getMediaUrl } from '@/config/media';
 import { isSessionExpired, getValidSession } from '@/utils/authHelpers';
 import { deleteStreamVideoByUid } from '@/utils/streamHelpers';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -396,15 +397,18 @@ export const FacebookCreatePost = ({ onPostCreated }: FacebookCreatePostProps) =
       if (abortController.signal.aborted) throw new Error('Đã huỷ');
       
       // Upload all media items (images only - videos handled by Uppy)
+      // Lưu key thay vì full URL - frontend sẽ build URL từ key
       const mediaUrls: Array<{ url: string; type: 'image' | 'video' }> = [];
       
       // Add Uppy-uploaded video first if exists
       if (uppyVideoResult) {
+        // Extract key from Uppy video URL hoặc giữ nguyên URL
+        const videoKey = uppyVideoResult.url.replace(/^https?:\/\/[^/]+\//, '');
         mediaUrls.push({
-          url: uppyVideoResult.url,
+          url: videoKey, // Lưu key thay vì full URL
           type: 'video',
         });
-        console.log('[CreatePost] Added video URL:', uppyVideoResult.url);
+        console.log('[CreatePost] Added video key:', videoKey);
       }
       
       for (const item of mediaItems) {
@@ -416,7 +420,7 @@ export const FacebookCreatePost = ({ onPostCreated }: FacebookCreatePostProps) =
           // Pass access token to avoid multiple getSession calls
           const result = await uploadToR2(item.file, 'posts', undefined, session.access_token);
           mediaUrls.push({
-            url: result.url,
+            url: result.key, // Lưu key thay vì full URL
             type: 'image',
           });
         }

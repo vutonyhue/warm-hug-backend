@@ -1,8 +1,8 @@
 import { supabase } from '@/integrations/supabase/client';
 
 export interface R2UploadResult {
-  url: string;
   key: string;
+  // url field removed - frontend will build URL from key using getMediaUrl()
 }
 
 /**
@@ -135,8 +135,8 @@ export async function uploadToR2(
   );
 
   return {
-    url: publicUrl,
     key: key,
+    // Không trả về url nữa - frontend sẽ build URL từ key
   };
 }
 

@@ -1,9 +1,10 @@
-import { useState, memo, useCallback } from 'react';
+import { useState, memo, useCallback, useMemo } from 'react';
 import { ImageViewer } from './ImageViewer';
 import { LazyImage } from '@/components/ui/LazyImage';
 import { LazyVideo } from '@/components/ui/LazyVideo';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { getMediaUrl } from '@/config/media';
 
 interface MediaItem {
   url: string;
@@ -25,8 +26,17 @@ export const MediaGrid = memo(({ media: initialMedia }: MediaGridProps) => {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [brokenUrls, setBrokenUrls] = useState<Set<string>>(new Set());
 
-  // Filter out broken media
-  const media = initialMedia.filter(item => !brokenUrls.has(item.url));
+  // Filter out broken media and build full URLs from keys
+  const media = useMemo(() => 
+    initialMedia
+      .filter(item => !brokenUrls.has(item.url))
+      .map(item => ({
+        ...item,
+        // Build full URL từ key (hoặc giữ nguyên nếu đã là full URL)
+        url: getMediaUrl(item.url),
+      })),
+    [initialMedia, brokenUrls]
+  );
 
   const handleMediaError = useCallback((url: string) => {
     setBrokenUrls(prev => new Set(prev).add(url));

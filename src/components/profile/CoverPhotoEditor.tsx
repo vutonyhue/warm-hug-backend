@@ -5,6 +5,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { uploadToR2 } from '@/utils/r2Upload';
+import { getMediaUrl } from '@/config/media';
 import { CoverCropper } from './CoverCropper';
 
 // Template cover images - using high-quality placeholder URLs
@@ -185,7 +186,7 @@ export function CoverPhotoEditor({ userId, currentCoverUrl, onCoverUpdated }: Co
       
       // Upload to R2 using 'avatars' bucket with access token
       const result = await uploadToR2(file, 'avatars', `${userId}/cover-${Date.now()}.jpg`, session.access_token);
-      const uploadedUrl = result.url;
+      const uploadedUrl = getMediaUrl(result.key);
       
       // Update profile in database
       const { error } = await supabase

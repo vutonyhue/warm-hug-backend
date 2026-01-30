@@ -9,15 +9,17 @@
  * - CF Images (imagedelivery.net): Use variant system
  */
 
+import { MEDIA_BASE_URL } from '@/config/media';
+
 // Cloudflare zone domain with Image Resizing enabled
 // Use the same-zone R2 custom domain to avoid remote-origin allowlist 403s.
-const CF_ZONE_DOMAIN = 'https://media-funprofile.funecosystem.org';
+const CF_ZONE_DOMAIN = MEDIA_BASE_URL;
 
-// R2 public bucket URL (production)
+// R2 public bucket URL (production) - giữ để nhận dạng URL cũ
 const R2_PUBLIC_URL = 'https://pub-5609558cd8fc4ca39dab5b2b919f43b1.r2.dev';
 
 // R2 production custom domain (recommended)
-const R2_CUSTOM_DOMAIN = 'https://media-funprofile.funecosystem.org';
+const R2_CUSTOM_DOMAIN = MEDIA_BASE_URL;
 
 export interface ImageTransformOptions {
   width?: number;

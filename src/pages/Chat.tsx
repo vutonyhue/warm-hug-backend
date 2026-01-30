@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { vi } from 'date-fns/locale';
 import { supabase } from '@/integrations/supabase/client';
 import { uploadCommentMedia } from '@/utils/mediaUpload';
+import { getMediaUrl } from '@/config/media';
 import { FacebookNavbar } from '@/components/layout/FacebookNavbar';
 import { MobileBottomNav } from '@/components/layout/MobileBottomNav';
 import { useIsMobile, useIsMobileOrTablet } from '@/hooks/use-mobile';
@@ -68,7 +69,7 @@ export default function Chat() {
     return async (file: File) => {
       const result = await uploadCommentMedia(file);
       return { 
-        url: result.url, 
+        url: getMediaUrl(result.key), 
         type: file.type.startsWith('audio/') ? 'voice' : undefined 
       };
     };
