@@ -51,11 +51,17 @@ const Friends = () => {
   }, [navigate]);
 
   const fetchFriendRequests = async (userId: string) => {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('friendships')
       .select('*')
       .eq('addressee_id', userId)
       .eq('status', 'pending');
+    
+    if (error) {
+      console.error('[Friends] Error fetching friend requests:', error);
+      setFriendRequests([]);
+      return;
+    }
     
     if (!data?.length) {
       setFriendRequests([]);
@@ -63,10 +69,21 @@ const Friends = () => {
     }
 
     const userIds = data.map(f => f.requester_id);
-    const { data: profilesData } = await supabase
+    
+    // Guard: không query nếu không có userIds
+    if (userIds.length === 0) {
+      setFriendRequests([]);
+      return;
+    }
+    
+    const { data: profilesData, error: profilesError } = await supabase
       .from('profiles')
       .select('id, username, full_name, avatar_url')
       .in('id', userIds);
+    
+    if (profilesError) {
+      console.error('[Friends] Error fetching profiles:', profilesError);
+    }
     
     const formatted = data.map(item => {
       const profile = profilesData?.find(p => p.id === item.requester_id);
@@ -84,11 +101,17 @@ const Friends = () => {
   };
 
   const fetchSentRequests = async (userId: string) => {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('friendships')
       .select('*')
       .eq('requester_id', userId)
       .eq('status', 'pending');
+    
+    if (error) {
+      console.error('[Friends] Error fetching sent requests:', error);
+      setSentRequests([]);
+      return;
+    }
     
     if (!data?.length) {
       setSentRequests([]);
@@ -96,10 +119,20 @@ const Friends = () => {
     }
 
     const friendIds = data.map(f => f.addressee_id);
-    const { data: profilesData } = await supabase
+    
+    if (friendIds.length === 0) {
+      setSentRequests([]);
+      return;
+    }
+    
+    const { data: profilesData, error: profilesError } = await supabase
       .from('profiles')
       .select('id, username, full_name, avatar_url')
       .in('id', friendIds);
+    
+    if (profilesError) {
+      console.error('[Friends] Error fetching profiles for sent:', profilesError);
+    }
     
     const formatted = data.map(item => {
       const profile = profilesData?.find(p => p.id === item.addressee_id);
@@ -117,10 +150,14 @@ const Friends = () => {
   };
 
   const fetchSuggestions = async (userId: string) => {
-    const { data: existingRelations } = await supabase
+    const { data: existingRelations, error: relError } = await supabase
       .from('friendships')
       .select('requester_id, addressee_id')
       .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`);
+
+    if (relError) {
+      console.error('[Friends] Error fetching relations:', relError);
+    }
 
     const excludedUserIds = new Set([userId]);
     existingRelations?.forEach(rel => {
@@ -128,12 +165,20 @@ const Friends = () => {
       excludedUserIds.add(rel.addressee_id);
     });
 
-    const { data } = await supabase
+    // Use public_profiles and filter client-side to avoid SQL issues
+    const { data, error } = await supabase
       .from('public_profiles')
       .select('id, username, avatar_url, full_name')
       .limit(20);
     
-    const filtered = (data || []).filter(p => !excludedUserIds.has(p.id!));
+    if (error) {
+      console.error('[Friends] Error fetching suggestions:', error);
+      setSuggestions([]);
+      return;
+    }
+    
+    const filtered = (data || []).filter(p => p.id && !excludedUserIds.has(p.id));
+    console.log('[Friends] Suggestions filtered:', filtered.length, 'from', data?.length);
     setSuggestions(filtered);
   };
 
