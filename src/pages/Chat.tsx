@@ -1,14 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
+import { vi } from 'date-fns/locale';
 import { supabase } from '@/integrations/supabase/client';
-import { useConversations } from '@/hooks/useConversations';
-import { useGroupConversations } from '@/hooks/useGroupConversations';
-import { useChatNotifications } from '@/hooks/useChatNotifications';
-import { ConversationList } from '@/components/chat/ConversationList';
-import { MessageThread } from '@/components/chat/MessageThread';
-import { NewConversationDialog } from '@/components/chat/NewConversationDialog';
-import { CreateGroupDialog } from '@/components/chat/CreateGroupDialog';
-import { ChatSettingsDialog } from '@/components/chat/ChatSettingsDialog';
+import { uploadCommentMedia } from '@/utils/mediaUpload';
 import { FacebookNavbar } from '@/components/layout/FacebookNavbar';
 import { MobileBottomNav } from '@/components/layout/MobileBottomNav';
 import { useIsMobile, useIsMobileOrTablet } from '@/hooks/use-mobile';
@@ -21,11 +16,26 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 
+// Import từ package chat SDK
+import {
+  ChatProvider,
+  ConversationList,
+  MessageThread,
+  NewConversationDialog,
+  CreateGroupDialog,
+  ChatSettingsDialog,
+  useConversations,
+  useGroupConversations,
+  useChatNotifications,
+} from '../../packages/chat/src';
+
 export default function Chat() {
   const { conversationId } = useParams<{ conversationId?: string }>();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const isMobileOrTablet = useIsMobileOrTablet();
+  const queryClient = useQueryClient();
+  
   const [userId, setUserId] = useState<string | null>(null);
   const [username, setUsername] = useState<string | null>(null);
   const [showNewConversation, setShowNewConversation] = useState(false);
@@ -53,11 +63,85 @@ export default function Chat() {
     checkAuth();
   }, [navigate]);
 
-  const { conversations, isLoading, createDirectConversation } = useConversations(userId);
-  const { createGroupConversation } = useGroupConversations(userId);
+  // Upload adapter cho package chat
+  const uploadChatMedia = useMemo(() => {
+    return async (file: File) => {
+      const result = await uploadCommentMedia(file);
+      return { 
+        url: result.url, 
+        type: file.type.startsWith('audio/') ? 'voice' : undefined 
+      };
+    };
+  }, []);
 
+  // Chat config cho ChatProvider
+  const chatConfig = useMemo(() => ({
+    supabase,
+    queryClient,
+    currentUserId: userId,
+    currentUsername: username,
+    uploadMedia: uploadChatMedia,
+    dateLocale: vi,
+  }), [userId, username, queryClient, uploadChatMedia]);
+
+  // Chờ auth hoàn tất
+  if (!userId) {
+    return (
+      <div className="min-h-screen bg-background flex flex-col">
+        <FacebookNavbar />
+        <div className="flex-1 flex items-center justify-center pt-14">
+          <div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <ChatProvider config={chatConfig}>
+      <ChatContent 
+        conversationId={conversationId}
+        isMobileOrTablet={isMobileOrTablet}
+        showNewConversation={showNewConversation}
+        setShowNewConversation={setShowNewConversation}
+        showCreateGroup={showCreateGroup}
+        setShowCreateGroup={setShowCreateGroup}
+        showSettings={showSettings}
+        setShowSettings={setShowSettings}
+      />
+    </ChatProvider>
+  );
+}
+
+// Tách ChatContent để sử dụng hooks từ ChatProvider
+interface ChatContentProps {
+  conversationId?: string;
+  isMobileOrTablet: boolean;
+  showNewConversation: boolean;
+  setShowNewConversation: (show: boolean) => void;
+  showCreateGroup: boolean;
+  setShowCreateGroup: (show: boolean) => void;
+  showSettings: boolean;
+  setShowSettings: (show: boolean) => void;
+}
+
+function ChatContent({
+  conversationId,
+  isMobileOrTablet,
+  showNewConversation,
+  setShowNewConversation,
+  showCreateGroup,
+  setShowCreateGroup,
+  showSettings,
+  setShowSettings,
+}: ChatContentProps) {
+  const navigate = useNavigate();
+  
+  // Sử dụng hooks từ package chat - lấy userId từ context
+  const { conversations, isLoading, createDirectConversation } = useConversations();
+  const { createGroupConversation } = useGroupConversations();
+  
   // Enable chat notifications
-  useChatNotifications(userId, conversationId || null);
+  useChatNotifications(conversationId || null);
 
   const handleSelectConversation = (id: string) => {
     navigate(`/chat/${id}`);
@@ -98,11 +182,7 @@ export default function Chat() {
                 </Button>
                 <span className="font-medium">Tin nhắn</span>
               </div>
-              <MessageThread
-                conversationId={conversationId}
-                userId={userId}
-                username={username}
-              />
+              <MessageThread conversationId={conversationId} />
             </div>
           ) : (
             <div className="h-full">
@@ -139,7 +219,6 @@ export default function Chat() {
               <ConversationList
                 conversations={conversations}
                 selectedId={null}
-                currentUserId={userId}
                 onSelect={handleSelectConversation}
                 isLoading={isLoading}
               />
@@ -152,14 +231,12 @@ export default function Chat() {
         <NewConversationDialog
           open={showNewConversation}
           onOpenChange={setShowNewConversation}
-          currentUserId={userId}
           onSelectUser={handleNewConversation}
         />
 
         <CreateGroupDialog
           open={showCreateGroup}
           onOpenChange={setShowCreateGroup}
-          currentUserId={userId}
           onCreateGroup={handleCreateGroup}
           isCreating={createGroupConversation.isPending}
         />
@@ -167,7 +244,6 @@ export default function Chat() {
         <ChatSettingsDialog
           open={showSettings}
           onOpenChange={setShowSettings}
-          userId={userId}
         />
       </div>
     );
@@ -214,7 +290,6 @@ export default function Chat() {
           <ConversationList
             conversations={conversations}
             selectedId={conversationId || null}
-            currentUserId={userId}
             onSelect={handleSelectConversation}
             isLoading={isLoading}
           />
@@ -223,11 +298,7 @@ export default function Chat() {
         {/* Main content - Message thread */}
         <div className="flex-1 flex flex-col h-[calc(100vh-3.5rem)]">
           {conversationId ? (
-            <MessageThread
-              conversationId={conversationId}
-              userId={userId}
-              username={username}
-            />
+            <MessageThread conversationId={conversationId} />
           ) : (
             <div className="flex-1 flex items-center justify-center text-muted-foreground">
               <div className="text-center">
@@ -242,14 +313,12 @@ export default function Chat() {
       <NewConversationDialog
         open={showNewConversation}
         onOpenChange={setShowNewConversation}
-        currentUserId={userId}
         onSelectUser={handleNewConversation}
       />
 
       <CreateGroupDialog
         open={showCreateGroup}
         onOpenChange={setShowCreateGroup}
-        currentUserId={userId}
         onCreateGroup={handleCreateGroup}
         isCreating={createGroupConversation.isPending}
       />
@@ -257,7 +326,6 @@ export default function Chat() {
       <ChatSettingsDialog
         open={showSettings}
         onOpenChange={setShowSettings}
-        userId={userId}
       />
     </div>
   );
