@@ -6,14 +6,15 @@ export interface R2UploadResult {
 }
 
 /**
- * Get presigned URL from edge function with timeout
+ * Get presigned URL from edge function with timeout and retry on 401
  */
 async function getPresignedUrl(
   key: string,
   contentType: string,
   fileSize: number,
   accessToken?: string,
-  timeoutMs: number = 30000
+  timeoutMs: number = 30000,
+  retryCount = 0
 ): Promise<{ uploadUrl: string; publicUrl: string }> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -44,6 +45,17 @@ async function getPresignedUrl(
     });
 
     if (!response.ok) {
+      // If 401 Unauthorized and haven't retried yet, try refreshing token
+      if (response.status === 401 && retryCount === 0) {
+        console.log('[R2Upload] Token expired (401), refreshing and retrying...');
+        clearTimeout(timeoutId);
+        
+        const { data: { session: newSession } } = await supabase.auth.refreshSession();
+        if (newSession) {
+          return getPresignedUrl(key, contentType, fileSize, newSession.access_token, timeoutMs, 1);
+        }
+      }
+      
       const errorData = await response.json().catch(() => ({}));
       throw new Error(errorData.error || `HTTP ${response.status}`);
     }

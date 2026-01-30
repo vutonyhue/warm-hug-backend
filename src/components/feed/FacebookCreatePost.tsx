@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { z } from 'zod';
 import { supabase } from '@/integrations/supabase/client';
 import { uploadToR2 } from '@/utils/r2Upload';
+import { isSessionExpired, getValidSession } from '@/utils/authHelpers';
 import { deleteStreamVideoByUid } from '@/utils/streamHelpers';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -310,13 +311,20 @@ export const FacebookCreatePost = ({ onPostCreated }: FacebookCreatePostProps) =
       // Check if aborted
       if (abortController.signal.aborted) throw new Error('Đã huỷ');
       
-      // === OPTIMIZED SESSION RETRIEVAL ===
-      // Priority: 1. Cached session → 2. Quick API call (3s) → 3. localStorage fallback
+      // === OPTIMIZED SESSION RETRIEVAL WITH EXPIRY CHECK ===
+      // Priority: 1. Valid cached session → 2. getValidSession (auto-refresh) → 3. localStorage fallback
       const authStartTime = Date.now();
       let session = cachedSessionRef.current;
       
+      // CHECK EXPIRY before using cached session
+      if (session && isSessionExpired(session, 60)) {
+        console.log('[CreatePost] Cached session expired or expiring soon, invalidating...');
+        session = null;
+        cachedSessionRef.current = null;
+      }
+      
       if (session) {
-        console.log('[CreatePost] Using cached session');
+        console.log('[CreatePost] Using valid cached session');
       } else {
         console.log('[CreatePost] No cached session, trying quick API call...');
         
