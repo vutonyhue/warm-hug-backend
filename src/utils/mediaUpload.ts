@@ -12,7 +12,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { compressImage, FILE_LIMITS } from './imageCompression';
 
 // R2 custom domain (dùng cho Cloudflare Image Resizing)
-const R2_CUSTOM_DOMAIN = 'https://media.fun.rich';
+const R2_CUSTOM_DOMAIN = 'https://media-funprofile.funecosystem.org';
 
 export interface MediaUploadResult {
   url: string;

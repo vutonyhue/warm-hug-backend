@@ -11,13 +11,13 @@
 
 // Cloudflare zone domain with Image Resizing enabled
 // Use the same-zone R2 custom domain to avoid remote-origin allowlist 403s.
-const CF_ZONE_DOMAIN = 'https://media.fun.rich';
+const CF_ZONE_DOMAIN = 'https://media-funprofile.funecosystem.org';
 
 // R2 public bucket URL (production)
 const R2_PUBLIC_URL = 'https://pub-5609558cd8fc4ca39dab5b2b919f43b1.r2.dev';
 
 // R2 production custom domain (recommended)
-const R2_CUSTOM_DOMAIN = 'https://media.fun.rich';
+const R2_CUSTOM_DOMAIN = 'https://media-funprofile.funecosystem.org';
 
 export interface ImageTransformOptions {
   width?: number;
@@ -211,7 +211,7 @@ export function getTransformedImageUrl(
   }
 
   // Same-origin path mode:
-  // https://media.fun.rich/cdn-cgi/image/{options}/posts/...
+  // https://media-funprofile.funecosystem.org/cdn-cgi/image/{options}/posts/...
   if (normalizedUrl.startsWith(R2_CUSTOM_DOMAIN)) {
     const u = new URL(normalizedUrl);
     return `${CF_ZONE_DOMAIN}/cdn-cgi/image/${cfOptions}${u.pathname}`;
