@@ -1,0 +1,28 @@
+name: Sync Chat SDK to Standalone Repo
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'packages/chat/**'
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Fun Profile repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push Chat SDK to standalone repo
+        uses: cpina/github-action-push-to-another-repository@main
+        env:
+          SSH_DEPLOY_KEY: ${{ secrets.CHAT_SDK_DEPLOY_KEY }}
+        with:
+          source-directory: 'packages/chat'
+          destination-github-username: 'fun-ecosystem'
+          destination-repository-name: 'chat-sdk'
+          target-branch: main
+          commit-message: 'Sync from Fun Profile - ${{ github.sha }}'

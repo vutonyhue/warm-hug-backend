@@ -3,6 +3,9 @@
 // Chat module for Fun Ecosystem
 // ============================================
 
+// Constants
+export { CHAT_SDK_VERSION, CHAT_SDK_NAME } from './constants';
+
 // Provider
 export { ChatProvider, useChatConfig, useChatSupabase, useChatUser, useChatQueryClient, useChatUpload } from './components/ChatProvider';
 
