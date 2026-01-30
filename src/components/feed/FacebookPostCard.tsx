@@ -20,7 +20,7 @@ import { ReactionSummary } from './ReactionSummary';
 import { MediaGrid } from './MediaGrid';
 import { ExpandableContent } from './ExpandableContent';
 import { extractPostStreamVideos, deleteStreamVideos } from '@/utils/streamHelpers';
-import { getMediaUrl } from '@/config/media';
+import { getMediaUrl, isCloudflareStreamUrl } from '@/config/media';
 import {
   MessageCircle,
   Share2,
@@ -300,22 +300,24 @@ const FacebookPostCardComponent = ({
   }, []);
 
   // Prepare media items for MediaGrid - memoized
-  // Build full URL từ key cho mỗi media item
+  // Giữ nguyên key/URL - MediaGrid sẽ build URL và xử lý Stream vs R2
   const mediaItems = useMemo(() => {
     const items: Array<{ url: string; type: 'image' | 'video' }> = [];
     
     if (post.media_urls && Array.isArray(post.media_urls) && post.media_urls.length > 0) {
+      // Truyền nguyên key/URL cho MediaGrid - nó sẽ xử lý build URL
       return post.media_urls.map(item => ({
         ...item,
-        url: getMediaUrl(item.url), // Build full URL từ key
+        url: item.url, // Giữ nguyên, MediaGrid sẽ gọi getMediaUrl
       }));
     }
     
+    // Fallback cho legacy fields
     if (post.image_url) {
-      items.push({ url: getMediaUrl(post.image_url), type: 'image' as const });
+      items.push({ url: post.image_url, type: 'image' as const });
     }
     if (post.video_url) {
-      items.push({ url: getMediaUrl(post.video_url), type: 'video' as const });
+      items.push({ url: post.video_url, type: 'video' as const });
     }
     return items;
   }, [post.media_urls, post.image_url, post.video_url]);

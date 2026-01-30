@@ -4,7 +4,7 @@ import { LazyImage } from '@/components/ui/LazyImage';
 import { LazyVideo } from '@/components/ui/LazyVideo';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
-import { getMediaUrl } from '@/config/media';
+import { getMediaUrl, isCloudflareStreamUrl } from '@/config/media';
 
 interface MediaItem {
   url: string;
@@ -27,17 +27,27 @@ export const MediaGrid = memo(({ media: initialMedia }: MediaGridProps) => {
   const [brokenUrls, setBrokenUrls] = useState<Set<string>>(new Set());
 
   // Filter out broken media and build full URLs from keys
+  // Stream videos (videodelivery.net) are kept as-is, R2 media gets URL built
   const media = useMemo(() => {
     console.log('[MediaGrid] initialMedia:', initialMedia);
     
     const result = initialMedia
       .filter(item => !brokenUrls.has(item.url))
       .map(item => {
+        // Detect Cloudflare Stream videos - giữ nguyên URL
+        const isStreamVideo = item.type === 'video' && isCloudflareStreamUrl(item.url);
+        
+        // Stream videos: giữ nguyên URL
+        // R2 media: build URL từ key (getMediaUrl đã xử lý cả 2 case)
         const builtUrl = getMediaUrl(item.url);
-        console.log('[MediaGrid] item.url:', item.url, '→ builtUrl:', builtUrl);
+        
+        console.log('[MediaGrid] item:', item.url, 
+          '→ type:', item.type, 
+          '→ isStream:', isStreamVideo,
+          '→ builtUrl:', builtUrl);
+          
         return {
           ...item,
-          // Build full URL từ key (hoặc giữ nguyên nếu đã là full URL)
           url: builtUrl,
         };
       });
