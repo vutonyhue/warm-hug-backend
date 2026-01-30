@@ -1,13 +1,13 @@
-# @fun-ecosystem/chat
+# @fun-ecosystem1/chat
 
 Chat module for Fun Ecosystem - provides messaging, group chats, and realtime features.
 
 ## Installation
 
 ```bash
-npm install @fun-ecosystem/chat
+npm install @fun-ecosystem1/chat
 # or
-pnpm add @fun-ecosystem/chat
+pnpm add @fun-ecosystem1/chat
 ```
 
 ## Peer Dependencies
@@ -28,7 +28,7 @@ import {
   ChatProvider, 
   ConversationList, 
   MessageThread 
-} from '@fun-ecosystem/chat';
+} from '@fun-ecosystem1/chat';
 import { createClient } from '@supabase/supabase-js';
 import { QueryClient } from '@tanstack/react-query';
 
