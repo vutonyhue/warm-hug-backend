@@ -28,6 +28,21 @@ Deno.serve(async (req: Request) => {
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
+    // Rate limit OTP verification attempts FIRST (before any verification logic)
+    const verifyRateLimit = await supabase.rpc('check_rate_limit', {
+      rate_key: `otp_verify:${identifier.toLowerCase()}`,
+      max_count: 10,
+      window_ms: 3600000 // 1 hour
+    });
+    
+    if (verifyRateLimit.data === false) {
+      console.warn('[OTP-VERIFY] Rate limit exceeded for verification:', identifier);
+      return new Response(
+        JSON.stringify({ success: false, error: 'Too many verification attempts. Please wait.' }),
+        { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
     // Find valid OTP
     const { data: otpRecord, error: fetchError } = await supabase
       .from('otp_codes')
@@ -68,21 +83,6 @@ Deno.serve(async (req: Request) => {
 
     // Determine user email (always use email since that's what we store)
     const userEmail = identifier.toLowerCase();
-
-    // Rate limit OTP verification attempts (separate from generation)
-    const verifyRateLimit = await supabase.rpc('check_rate_limit', {
-      rate_key: `otp_verify:${identifier.toLowerCase()}`,
-      max_count: 10,
-      window_ms: 3600000 // 1 hour
-    });
-    
-    if (verifyRateLimit.data && !verifyRateLimit.data.allowed) {
-      console.warn('[OTP-VERIFY] Rate limit exceeded for verification:', identifier);
-      return new Response(
-        JSON.stringify({ success: false, error: 'Too many verification attempts. Please wait.' }),
-        { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
 
     // Optimized: Find user by email using profiles table (O(1) indexed lookup instead of O(n) pagination)
     const findUserByEmail = async (email: string) => {
