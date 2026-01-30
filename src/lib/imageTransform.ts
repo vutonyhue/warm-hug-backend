@@ -13,8 +13,8 @@
 // Use the same-zone R2 custom domain to avoid remote-origin allowlist 403s.
 const CF_ZONE_DOMAIN = 'https://media.fun.rich';
 
-// R2 public bucket URL (legacy dev URL)
-const R2_PUBLIC_URL = 'https://pub-e83e74b0726742fbb6a60bc08f95624b.r2.dev';
+// R2 public bucket URL (production)
+const R2_PUBLIC_URL = 'https://pub-5609558cd8fc4ca39dab5b2b919f43b1.r2.dev';
 
 // R2 production custom domain (recommended)
 const R2_CUSTOM_DOMAIN = 'https://media.fun.rich';
