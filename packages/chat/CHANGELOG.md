@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to `@fun-ecosystem/chat` will be documented in this file.
+All notable changes to `@fun-ecosystem1/chat` will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.0.0] - 2025-01-30
 
 ### Added
-- Initial release of @fun-ecosystem/chat
+- Initial release of @fun-ecosystem1/chat
 - **ChatProvider** - Dependency Injection pattern for Supabase, QueryClient, and upload functions
 - **ConversationList** - Display conversations with search and realtime updates
 - **MessageThread** - Full message view with reactions, replies, and read receipts

@@ -22,7 +22,7 @@ jobs:
           SSH_DEPLOY_KEY: ${{ secrets.CHAT_SDK_DEPLOY_KEY }}
         with:
           source-directory: 'packages/chat'
-          destination-github-username: 'fun-ecosystem'
+          destination-github-username: 'fun-ecosystem1'
           destination-repository-name: 'chat-sdk'
           target-branch: main
           commit-message: 'Sync from Fun Profile - ${{ github.sha }}'

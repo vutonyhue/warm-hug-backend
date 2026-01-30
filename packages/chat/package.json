@@ -1,5 +1,5 @@
 {
-  "name": "@fun-ecosystem/chat",
+  "name": "@fun-ecosystem1/chat",
   "version": "1.0.0",
   "description": "Chat module for Fun Ecosystem - provides messaging, groups, voice messages, and realtime features",
   "type": "module",

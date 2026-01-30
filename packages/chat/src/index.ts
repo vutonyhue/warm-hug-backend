@@ -1,5 +1,5 @@
 // ============================================
-// @fun-ecosystem/chat
+// @fun-ecosystem1/chat
 // Chat module for Fun Ecosystem
 // ============================================
 

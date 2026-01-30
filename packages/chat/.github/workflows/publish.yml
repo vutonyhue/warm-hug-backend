@@ -1,4 +1,4 @@
-name: Publish @fun-ecosystem/chat to npm
+name: Publish @fun-ecosystem1/chat to npm
 
 on:
   release:
@@ -65,7 +65,7 @@ jobs:
       - name: Check if version exists
         run: |
           VERSION=$(node -p "require('./package.json').version")
-          if npm view @fun-ecosystem/chat@$VERSION version 2>/dev/null; then
+          if npm view @fun-ecosystem1/chat@$VERSION version 2>/dev/null; then
             echo "⚠️ Version $VERSION already exists!"
             exit 1
           fi
@@ -82,4 +82,4 @@ jobs:
     if: success()
     steps:
       - name: Notification
-        run: echo "✅ @fun-ecosystem/chat published successfully!"
+        run: echo "✅ @fun-ecosystem1/chat published successfully!"
