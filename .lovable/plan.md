@@ -1,112 +1,179 @@
 
-# Kế hoạch: Sửa CORS Headers cho tất cả Edge Functions
+# Kế hoạch: Sửa lỗi "Unauthorized" khi đăng bài
 
-## Vấn đề gốc
+## Nguyên nhân
 
-Supabase JavaScript client (v2.93.1) tự động gửi các headers mới:
-- `x-supabase-client-platform` (ví dụ: "Windows")
-- `x-supabase-client-platform-version`
-- `x-supabase-client-runtime`
-- `x-supabase-client-runtime-version`
-
-Nhưng tất cả Edge Functions chỉ cho phép:
-```
-authorization, x-client-info, apikey, content-type
-```
-
-**Kết quả**: Browser chặn request do CORS policy violation khi preflight check thất bại.
+Token JWT đã hết hạn nhưng frontend vẫn sử dụng token cũ từ cache. Logs xác nhận:
+- Lỗi: `token has invalid claims: token is expired`
+- Request thất bại lúc 02:34:53Z  
+- Token được refresh thành công lúc 02:37:07Z (sau khi đã lỗi)
 
 ## Giải pháp
 
-Cập nhật CORS headers trong **tất cả Edge Functions** để bao gồm các headers mới từ Supabase client.
+### Bước 1: Tạo utility function kiểm tra token expiry
 
-## Danh sách files cần sửa
+Tạo helper function để kiểm tra session còn hạn hay không trước khi sử dụng.
 
-| # | File | CORS cần sửa |
-|---|------|--------------|
-| 1 | `supabase/functions/sso-authorize/index.ts` | Line 4-6 |
-| 2 | `supabase/functions/sso-token/index.ts` | Line 4-6 |
-| 3 | `supabase/functions/sso-verify/index.ts` | Line 4-6 |
-| 4 | `supabase/functions/sso-refresh/index.ts` | Line 4-6 |
-| 5 | `supabase/functions/sso-revoke/index.ts` | Line 4-6 |
-| 6 | `supabase/functions/sso-otp-request/index.ts` | Line 4-6 |
-| 7 | `supabase/functions/sso-otp-verify/index.ts` | Line 4-6 |
-| 8 | `supabase/functions/sso-register/index.ts` | Line 4-6 |
-| 9 | `supabase/functions/sso-web3-auth/index.ts` | Line 4-6 |
-| 10 | `supabase/functions/sso-set-password/index.ts` | Line 4-6 |
-| 11 | `supabase/functions/sso-sync-data/index.ts` | Line 4-6 |
-| 12 | `supabase/functions/sso-sync-financial/index.ts` | Line 4-6 |
-| 13 | `supabase/functions/sso-merge-request/index.ts` | Line 4-6 |
-| 14 | `supabase/functions/sso-merge-approve/index.ts` | Line 4-6 |
-| 15 | `supabase/functions/sso-resend-webhook/index.ts` | Line 4-6 |
-| 16 | `supabase/functions/stream-video/index.ts` | Line 4-8 |
-| 17 | `supabase/functions/get-upload-url/index.ts` | Line 12-14 |
-| 18 | `supabase/functions/upload-to-r2/index.ts` | Line 3-6 |
-| 19 | `supabase/functions/delete-from-r2/index.ts` | Line cần tìm |
-| 20 | `supabase/functions/api-feed/index.ts` | Line cần tìm |
-| 21 | `supabase/functions/api-leaderboard/index.ts` | Line cần tìm |
-| 22 | `supabase/functions/create-post/index.ts` | Line cần tìm |
-| 23 | `supabase/functions/admin-list-merge-requests/index.ts` | Line cần tìm |
-| 24 | `supabase/functions/admin-update-media-url/index.ts` | Line cần tìm |
-| 25 | `supabase/functions/connect-external-wallet/index.ts` | Line cần tìm |
-| 26 | `supabase/functions/create-custodial-wallet/index.ts` | Line cần tìm |
-| 27 | `supabase/functions/delete-user-account/index.ts` | Line cần tìm |
-| 28 | `supabase/functions/generate-presigned-url/index.ts` | Line cần tìm |
-| 29 | `supabase/functions/image-transform/index.ts` | Line cần tìm |
-| 30 | `supabase/functions/mint-soul-nft/index.ts` | Line cần tìm |
-| Các functions còn lại | Các edge functions khác trong thư mục | Tương tự |
+**File**: `src/utils/authHelpers.ts` (tạo mới)
 
-## Thay đổi cụ thể
-
-**TRƯỚC (sai):**
 ```typescript
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
+// Kiểm tra token có hết hạn hay không (buffer 60s)
+export function isSessionExpired(session: any, bufferSeconds = 60): boolean
+
+// Lấy fresh session, tự động refresh nếu cần
+export async function getValidSession(): Promise<Session | null>
 ```
 
-**SAU (đúng):**
+### Bước 2: Cập nhật FacebookCreatePost.tsx
+
+Thay đổi logic lấy session trong `handleSubmit()`:
+
+**Trước (có bug)**:
+- Dùng cached session không kiểm tra expiry
+- Fallback không đủ mạnh
+
+**Sau (đã fix)**:
+- Kiểm tra `expires_at` của cached session
+- Nếu sắp hết hạn (< 60s), force refresh ngay
+- Cập nhật cache sau khi refresh thành công
+
+### Bước 3: Cập nhật r2Upload.ts với retry logic
+
+Thêm retry mechanism cho trường hợp token bị expired giữa chừng:
+
 ```typescript
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
-};
+// Nếu gặp 401 Unauthorized, thử refresh token và retry 1 lần
+if (response.status === 401) {
+  const newSession = await supabase.auth.refreshSession();
+  // Retry với token mới
+}
 ```
 
-## Kế hoạch triển khai
+### Bước 4: Cải thiện cachedSessionRef listener
 
-### Bước 1: Cập nhật tất cả SSO functions (ưu tiên cao)
-- sso-authorize, sso-token, sso-verify, sso-refresh, sso-revoke
-- sso-otp-request, sso-otp-verify, sso-register
-- sso-web3-auth, sso-set-password
-- sso-sync-data, sso-sync-financial
-- sso-merge-request, sso-merge-approve, sso-resend-webhook
+Trong `useEffect` subscribe auth state, thêm logic invalidate cache khi token sắp hết hạn.
 
-### Bước 2: Cập nhật Media upload functions
-- stream-video, get-upload-url, upload-to-r2, delete-from-r2
-- generate-presigned-url, image-transform
+## Chi tiết kỹ thuật
 
-### Bước 3: Cập nhật API functions
-- api-feed, api-leaderboard, create-post
+### File 1: `src/utils/authHelpers.ts` (tạo mới)
 
-### Bước 4: Cập nhật Admin & User functions
-- admin-list-merge-requests, admin-update-media-url
-- connect-external-wallet, create-custodial-wallet
-- delete-user-account, mint-soul-nft
+```typescript
+import { supabase } from '@/integrations/supabase/client';
+import type { Session } from '@supabase/supabase-js';
 
-### Bước 5: Cập nhật các functions còn lại
-- cleanup functions, migrate functions, etc.
+/**
+ * Kiểm tra session có hết hạn hoặc sắp hết hạn không
+ * @param session - Supabase session object
+ * @param bufferSeconds - Số giây buffer trước khi coi là "sắp hết hạn" (mặc định 60s)
+ */
+export function isSessionExpired(session: Session | null, bufferSeconds = 60): boolean {
+  if (!session?.expires_at) return true;
+  
+  const expiresAt = session.expires_at * 1000; // Convert to milliseconds
+  const now = Date.now();
+  const bufferMs = bufferSeconds * 1000;
+  
+  return now >= (expiresAt - bufferMs);
+}
 
-## Kết quả sau khi triển khai
+/**
+ * Lấy valid session, tự động refresh nếu expired hoặc sắp expired
+ * @returns Fresh session hoặc null nếu không thể lấy
+ */
+export async function getValidSession(): Promise<Session | null> {
+  // Lấy session hiện tại
+  const { data: { session } } = await supabase.auth.getSession();
+  
+  // Nếu không có session
+  if (!session) return null;
+  
+  // Nếu session còn hạn (> 60s), trả về luôn
+  if (!isSessionExpired(session, 60)) {
+    return session;
+  }
+  
+  // Session sắp hết hạn hoặc đã hết, refresh
+  console.log('[Auth] Session expired or expiring soon, refreshing...');
+  const { data: { session: newSession }, error } = await supabase.auth.refreshSession();
+  
+  if (error) {
+    console.error('[Auth] Failed to refresh session:', error.message);
+    return null;
+  }
+  
+  return newSession;
+}
+```
 
-- Không còn lỗi CORS trong browser console
-- Frontend requests thành công
-- Video upload qua Cloudflare Stream vẫn hoạt động bình thường
-- Authentication flows vẫn hoạt động
+### File 2: `src/components/feed/FacebookCreatePost.tsx`
 
-## Lưu ý
+Cập nhật phần lấy session (khoảng lines 309-378):
 
-- Cloudflare R2 CORS là vấn đề riêng (đã được xử lý trước đó bằng cách chuyển sang backend upload)
-- Thay đổi này chỉ ảnh hưởng đến Edge Functions, không ảnh hưởng đến Cloudflare CDN
-- Các Edge Functions sẽ được auto-deploy sau khi cập nhật code
+```typescript
+// === OPTIMIZED SESSION RETRIEVAL WITH EXPIRY CHECK ===
+import { isSessionExpired, getValidSession } from '@/utils/authHelpers';
+
+// Trong handleSubmit():
+let session = cachedSessionRef.current;
+
+// CHECK EXPIRY trước khi dùng cached session
+if (session && isSessionExpired(session, 60)) {
+  console.log('[CreatePost] Cached session expired, invalidating...');
+  session = null;
+  cachedSessionRef.current = null;
+}
+
+if (session) {
+  console.log('[CreatePost] Using valid cached session');
+} else {
+  // Get fresh valid session (auto-refresh if needed)
+  session = await getValidSession();
+  if (session) {
+    cachedSessionRef.current = session;
+  }
+}
+```
+
+### File 3: `src/utils/r2Upload.ts`
+
+Thêm retry logic khi gặp 401:
+
+```typescript
+async function getPresignedUrl(
+  key: string,
+  contentType: string,
+  fileSize: number,
+  accessToken?: string,
+  timeoutMs: number = 30000,
+  retryCount = 0 // Thêm retry counter
+): Promise<{ uploadUrl: string; publicUrl: string }> {
+  // ... existing code ...
+  
+  if (!response.ok) {
+    // Nếu 401 và chưa retry, thử refresh và retry
+    if (response.status === 401 && retryCount === 0) {
+      console.log('[R2Upload] Token expired, refreshing and retrying...');
+      const { data: { session } } = await supabase.auth.refreshSession();
+      if (session) {
+        return getPresignedUrl(key, contentType, fileSize, session.access_token, timeoutMs, 1);
+      }
+    }
+    // ... existing error handling ...
+  }
+}
+```
+
+## Tóm tắt thay đổi
+
+| File | Thay đổi |
+|------|----------|
+| `src/utils/authHelpers.ts` | Tạo mới - utilities kiểm tra và refresh session |
+| `src/components/feed/FacebookCreatePost.tsx` | Thêm kiểm tra expiry cho cached session |
+| `src/utils/r2Upload.ts` | Thêm retry logic khi gặp 401 |
+
+## Kết quả mong đợi
+
+- Không còn lỗi "Unauthorized" khi đăng bài
+- Token được refresh tự động trước khi hết hạn
+- Nếu vẫn gặp 401, tự động retry sau khi refresh
+- Video và ảnh upload hoạt động bình thường
