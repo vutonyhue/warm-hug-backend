@@ -1,7 +1,7 @@
 {
   "name": "@fun-ecosystem/chat",
   "version": "1.0.0",
-  "description": "Chat module for Fun Ecosystem - provides messaging, groups, and realtime features",
+  "description": "Chat module for Fun Ecosystem - provides messaging, groups, voice messages, and realtime features",
   "type": "module",
   "main": "dist/index.cjs.js",
   "module": "dist/index.esm.js",
@@ -15,13 +15,19 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "build": "rollup -c",
     "dev": "rollup -c -w",
     "type-check": "tsc --noEmit",
-    "test": "vitest"
+    "test": "vitest --passWithNoTests",
+    "prepublishOnly": "npm run build",
+    "release:patch": "npm version patch && npm publish --access public",
+    "release:minor": "npm version minor && npm publish --access public",
+    "release:major": "npm version major && npm publish --access public"
   },
   "peerDependencies": {
     "react": "^18.0.0",
@@ -47,6 +53,8 @@
     "fun-ecosystem",
     "chat",
     "messaging",
+    "voice-messages",
+    "realtime",
     "react",
     "supabase"
   ],
@@ -54,6 +62,17 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/fun-ecosystem/fun-profile"
+    "url": "https://github.com/fun-ecosystem/chat-sdk"
+  },
+  "bugs": {
+    "url": "https://github.com/fun-ecosystem/chat-sdk/issues"
+  },
+  "homepage": "https://github.com/fun-ecosystem/chat-sdk#readme",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   }
 }

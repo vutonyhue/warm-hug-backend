@@ -1,0 +1,24 @@
+# Source files (dist is included)
+src/
+*.ts
+!*.d.ts
+
+# Config files
+tsconfig.json
+rollup.config.js
+vitest.config.ts
+.eslintrc*
+
+# Dev files
+.github/
+*.test.ts
+*.spec.ts
+__tests__/
+
+# Editor
+.vscode/
+.idea/
+
+# Misc
+*.log
+.DS_Store
