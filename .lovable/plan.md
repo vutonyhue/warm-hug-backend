@@ -1,198 +1,231 @@
 
 
-# Kế hoạch: Sửa lỗi Video 404 + Hiển thị Video trong Feed
+# Kế hoạch: Sửa lỗi và hoàn thiện tính năng Kết bạn
 
-## Phân tích vấn đề
+## Tình trạng hiện tại
 
-### Kiến trúc hiện tại
+### ✅ Đã hoạt động tốt
+| Thành phần | Trạng thái |
+|------------|-----------|
+| Bảng `friendships` | Có đầy đủ columns: id, requester_id, addressee_id, status, created_at |
+| RLS Policies | SELECT, INSERT, UPDATE, DELETE đều có policy phù hợp |
+| Gửi lời mời | Hoạt động ✓ (có 2 pending requests trong DB) |
+| Hủy lời mời | Hoạt động ✓ |
+| Network requests | Trả về 200 OK |
 
-Ứng dụng có **2 hệ thống lưu trữ video khác nhau**:
+### ⚠️ Vấn đề cần sửa
 
-| Hệ thống | Mô tả | URL Format |
-|----------|-------|------------|
-| **Cloudflare Stream** | Video lớn upload qua TUS protocol | `https://iframe.videodelivery.net/{uid}` |
-| **Cloudflare R2** | Ảnh + video nhỏ upload trực tiếp | `posts/timestamp-random.mp4` |
-
-### Vấn đề đã xác định
-
-**Issue 1: Lưu video key sai**
-
-Trong `FacebookCreatePost.tsx` dòng 405-408:
-```typescript
-if (uppyVideoResult) {
-  // Extract key từ URL - LOGIC SAI!
-  const videoKey = uppyVideoResult.url.replace(/^https?:\/\/[^/]+\//, '');
-  // Kết quả: "d4f3a2b1c5e6..." (chỉ UID, không có extension)
-}
-```
-
-Video từ Cloudflare Stream có URL là `https://iframe.videodelivery.net/{uid}` (không có `.mp4`), nên khi extract key chỉ còn lại UID trần.
-
-**Issue 2: getMediaUrl() xử lý sai Stream URLs**
-
-Khi render, `getMediaUrl("d4f3a2b1c5e6...")` trả về:
-```
-https://media-funprofile.funecosystem.org/d4f3a2b1c5e6...
-```
-
-URL này 404 vì file không tồn tại trên R2 - nó nằm trên Cloudflare Stream.
-
-**Issue 3: isStreamUrl() không được gọi đúng thời điểm**
-
-`LazyVideo` có logic phát hiện Stream URL (`isStreamUrl`), nhưng URL đã bị transform sai trước khi đến component này.
-
-### Giải pháp
-
-Phân biệt rõ 2 loại video:
-- **Cloudflare Stream**: Lưu full URL (không transform)
-- **Cloudflare R2**: Lưu key (transform bằng `getMediaUrl`)
+| Vấn đề | Mô tả |
+|--------|-------|
+| **Query profiles** | Dùng `.in('id', userIds)` có thể trả về rỗng nếu userIds = [] |
+| **Suggestions filter** | Dùng `.not('id', 'in', ...)` sẽ lỗi nếu excludedUserIds chỉ có 1 phần tử |
+| **Thiếu error handling** | Không log lỗi khi query fails |
+| **Thiếu loading state cho actions** | UI không phản hồi khi đang xử lý |
+| **Thiếu liên kết Chat** | Chưa có nút "Nhắn tin" nhanh với bạn bè |
 
 ---
 
 ## Các thay đổi chi tiết
 
-### 1. Sửa `src/config/media.ts`
+### 1. Sửa `src/pages/Friends.tsx`
 
-Thêm helper functions để detect và xử lý Stream URLs:
+**Vấn đề 1:** Khi `userIds` hoặc `friendIds` là array rỗng, query `.in('id', [])` có thể gây lỗi hoặc trả về không đúng.
+
+**Vấn đề 2:** Thiếu error handling và logging.
 
 ```typescript
-// Thêm export mới
-export function isCloudflareStreamUrl(url: string): boolean {
-  return url.includes('videodelivery.net') || url.includes('cloudflarestream.com');
-}
-
-// Sửa getMediaUrl để KHÔNG transform Stream URLs
-export function getMediaUrl(key: string | null | undefined): string {
-  if (!key) return '/placeholder.svg';
+// Sửa fetchFriendRequests
+const fetchFriendRequests = async (userId: string) => {
+  const { data, error } = await supabase
+    .from('friendships')
+    .select('*')
+    .eq('addressee_id', userId)
+    .eq('status', 'pending');
   
-  // Nếu là Cloudflare Stream URL, trả về nguyên vẹn
-  if (key.includes('videodelivery.net') || key.includes('cloudflarestream.com')) {
-    return key;
+  // Thêm error handling
+  if (error) {
+    console.error('[Friends] Error fetching friend requests:', error);
+    setFriendRequests([]);
+    return;
   }
   
-  // Nếu đã là full URL, trả về nguyên vẹn
-  if (key.startsWith('http://') || key.startsWith('https://')) {
-    return key;
+  if (!data?.length) {
+    setFriendRequests([]);
+    return;
+  }
+
+  const userIds = data.map(f => f.requester_id);
+  
+  // Guard: không query nếu không có userIds
+  if (userIds.length === 0) {
+    setFriendRequests([]);
+    return;
   }
   
-  // Build full URL từ key
-  return `${MEDIA_BASE_URL}/${key}`;
-}
+  const { data: profilesData, error: profilesError } = await supabase
+    .from('profiles')
+    .select('id, username, full_name, avatar_url')
+    .in('id', userIds);
+  
+  if (profilesError) {
+    console.error('[Friends] Error fetching profiles:', profilesError);
+  }
+  
+  // ... rest of the code
+};
 ```
 
-### 2. Sửa `src/components/feed/FacebookCreatePost.tsx`
+**Tương tự cho `fetchSentRequests` và `fetchSuggestions`.**
 
-**Dòng 401-428**: Sửa logic lưu video key
+### 2. Sửa `src/components/friends/FriendsList.tsx`
+
+**Vấn đề:** `.not('id', 'in', ...)` với 1 phần tử sẽ không format đúng.
 
 ```typescript
-// Trước
-if (uppyVideoResult) {
-  const videoKey = uppyVideoResult.url.replace(/^https?:\/\/[^/]+\//, '');
-  mediaUrls.push({
-    url: videoKey,
-    type: 'video',
+// Sửa fetchSuggestions
+const fetchSuggestions = async () => {
+  const { data: existingRelations } = await supabase
+    .from("friendships")
+    .select("requester_id, addressee_id")
+    .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`);
+
+  const excludedUserIds = new Set([userId]);
+  existingRelations?.forEach(rel => {
+    excludedUserIds.add(rel.requester_id);
+    excludedUserIds.add(rel.addressee_id);
   });
-}
 
-// Sau: Lưu nguyên full URL cho Stream videos
-if (uppyVideoResult) {
-  // Stream videos: lưu full URL (không extract key)
-  mediaUrls.push({
-    url: uppyVideoResult.url, // Giữ nguyên: https://iframe.videodelivery.net/{uid}
-    type: 'video',
-  });
-  console.log('[CreatePost] Added Stream video URL:', uppyVideoResult.url);
-}
-```
+  // Sử dụng public_profiles view thay vì profiles
+  // và filter phía client để tránh lỗi SQL
+  const { data: profilesData, error } = await supabase
+    .from("public_profiles")
+    .select("id, username, full_name, avatar_url")
+    .limit(20);
 
-### 3. Sửa `src/components/feed/MediaGrid.tsx`
+  if (error) {
+    console.error('[FriendsList] Error fetching suggestions:', error);
+    setSuggestions([]);
+    return;
+  }
 
-**Dòng 30-47**: Thêm logging chi tiết và xử lý riêng cho video
-
-```typescript
-const media = useMemo(() => {
-  console.log('[MediaGrid] initialMedia:', initialMedia);
-  
-  const result = initialMedia
-    .filter(item => !brokenUrls.has(item.url))
-    .map(item => {
-      // Với video, kiểm tra xem có phải Stream URL không
-      const isStreamVideo = item.type === 'video' && 
-        (item.url.includes('videodelivery.net') || item.url.includes('cloudflarestream.com'));
-      
-      // Stream videos: giữ nguyên URL
-      // R2 media: build URL từ key
-      const builtUrl = isStreamVideo ? item.url : getMediaUrl(item.url);
-      
-      console.log('[MediaGrid] item:', item.url, 
-        '→ type:', item.type, 
-        '→ isStream:', isStreamVideo,
-        '→ builtUrl:', builtUrl);
-        
-      return {
-        ...item,
-        url: builtUrl,
-      };
-    });
-  
-  console.log('[MediaGrid] final media:', result);
-  return result;
-}, [initialMedia, brokenUrls]);
-```
-
-### 4. Sửa `src/hooks/useFeedPosts.ts`
-
-**Dòng 68-78**: Thêm logic tương tự khi parse response
-
-```typescript
-// Import thêm
-import { getMediaUrl } from '@/config/media';
-
-// Helper function
-const isStreamVideoUrl = (url: string) => 
-  url?.includes('videodelivery.net') || url?.includes('cloudflarestream.com');
-
-// Trong map function
-media_urls: post.media_urls ? (post.media_urls as any[]).map((m: any) => ({
-  url: m.type === 'video' && isStreamVideoUrl(m.url) 
-    ? m.url  // Stream video: giữ nguyên
-    : getMediaUrl(m.url),  // R2 media: build URL
-  type: m.type,
-})) : null,
-```
-
-### 5. Sửa `src/components/feed/FacebookPostCard.tsx`
-
-**Dòng 302-316**: Cập nhật useMemo tương tự
-
-```typescript
-const mediaItems = useMemo(() => {
-  const isStreamVideoUrl = (url: string) => 
-    url?.includes('videodelivery.net') || url?.includes('cloudflarestream.com');
-    
-  const items: Array<{ url: string; type: 'image' | 'video' }> = [];
-  
-  if (post.media_urls && Array.isArray(post.media_urls) && post.media_urls.length > 0) {
-    return post.media_urls.map(item => ({
-      ...item,
-      url: item.type === 'video' && isStreamVideoUrl(item.url)
-        ? item.url  // Stream video: giữ nguyên
-        : getMediaUrl(item.url),  // R2 media: build URL
+  // Filter phía client
+  const suggestionsList: Friend[] = (profilesData || [])
+    .filter(profile => profile.id && !excludedUserIds.has(profile.id))
+    .map(profile => ({
+      id: profile.id!,
+      username: profile.username || 'Unknown',
+      full_name: profile.full_name || "",
+      avatar_url: profile.avatar_url || "",
+      friendship_id: ""
     }));
-  }
+
+  setSuggestions(suggestionsList);
+};
+```
+
+### 3. Thêm nút "Nhắn tin" trong FriendsList
+
+**File:** `src/components/friends/FriendsList.tsx`
+
+Thêm chức năng navigate tới Chat khi click "Nhắn tin":
+
+```typescript
+const handleStartChat = async (friendId: string) => {
+  // Tìm hoặc tạo conversation với friend
+  // Sau đó navigate tới /chat?user={friendId}
+  navigate(`/chat?user=${friendId}`);
+};
+
+// Trong DropdownMenuItem
+<DropdownMenuItem onClick={() => handleStartChat(friend.id)}>
+  <MessageCircle className="w-4 h-4 mr-2" />
+  Nhắn tin
+</DropdownMenuItem>
+```
+
+### 4. Thêm Realtime subscription
+
+**File:** `src/pages/Friends.tsx`
+
+Cải thiện realtime subscription để catch tất cả các thay đổi:
+
+```typescript
+useEffect(() => {
+  // ... existing code
   
-  // Fallback cho legacy fields
-  if (post.image_url) {
-    items.push({ url: getMediaUrl(post.image_url), type: 'image' as const });
+  // Subscribe to friendships changes
+  const channel = supabase
+    .channel('friendships-realtime')
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'friendships',
+        filter: `requester_id=eq.${currentUserId}`
+      },
+      (payload) => {
+        console.log('[Friends] Realtime update (requester):', payload);
+        fetchFriendRequests(currentUserId);
+        fetchSentRequests(currentUserId);
+        fetchSuggestions(currentUserId);
+      }
+    )
+    .on(
+      'postgres_changes', 
+      {
+        event: '*',
+        schema: 'public',
+        table: 'friendships',
+        filter: `addressee_id=eq.${currentUserId}`
+      },
+      (payload) => {
+        console.log('[Friends] Realtime update (addressee):', payload);
+        fetchFriendRequests(currentUserId);
+        fetchSentRequests(currentUserId);
+        fetchSuggestions(currentUserId);
+      }
+    )
+    .subscribe();
+
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}, [currentUserId]);
+```
+
+### 5. Cải thiện UX với loading states
+
+**File:** `src/pages/Friends.tsx`
+
+```typescript
+const [actionLoading, setActionLoading] = useState<string | null>(null);
+
+const handleRequestAction = async (id: string, action: string) => {
+  setActionLoading(id);
+  try {
+    if (action === 'accept') {
+      const { error } = await supabase
+        .from('friendships')
+        .update({ status: 'accepted' })
+        .eq('id', id);
+      if (!error) {
+        toast.success('Đã chấp nhận lời mời kết bạn!');
+        // Refresh data
+        await Promise.all([
+          fetchFriendRequests(currentUserId),
+          fetchSuggestions(currentUserId)
+        ]);
+      } else {
+        toast.error('Không thể chấp nhận lời mời');
+        console.error('[Friends] Accept error:', error);
+      }
+    }
+    // ... similar for other actions
+  } finally {
+    setActionLoading(null);
   }
-  if (post.video_url) {
-    const videoUrl = isStreamVideoUrl(post.video_url) 
-      ? post.video_url 
-      : getMediaUrl(post.video_url);
-    items.push({ url: videoUrl, type: 'video' as const });
-  }
-  return items;
-}, [post.media_urls, post.image_url, post.video_url]);
+};
 ```
 
 ---
@@ -201,47 +234,38 @@ const mediaItems = useMemo(() => {
 
 | File | Thay đổi |
 |------|----------|
-| `src/config/media.ts` | Thêm `isCloudflareStreamUrl()`, sửa `getMediaUrl()` để không transform Stream URLs |
-| `src/components/feed/FacebookCreatePost.tsx` | Lưu full URL cho Stream videos thay vì extract key |
-| `src/components/feed/MediaGrid.tsx` | Phân biệt Stream vs R2 khi build URL |
-| `src/hooks/useFeedPosts.ts` | Tương tự MediaGrid |
-| `src/components/feed/FacebookPostCard.tsx` | Tương tự MediaGrid |
+| `src/pages/Friends.tsx` | Thêm error handling, realtime subscription, loading states |
+| `src/components/friends/FriendsList.tsx` | Sửa fetchSuggestions filter, thêm handleStartChat |
+| `src/components/friends/FriendCarousel.tsx` | Thêm loading state cho buttons |
 
 ---
 
-## Flow mới
+## Chuẩn bị cho tính năng Chat
 
-### Upload Video (Cloudflare Stream)
-```text
-1. User chọn video file
-2. VideoUploaderUppy upload lên Cloudflare Stream
-3. Nhận url: "https://iframe.videodelivery.net/{uid}"
-4. Lưu vào DB: media_urls = [{ url: "https://iframe.videodelivery.net/{uid}", type: "video" }]
-```
+Sau khi hoàn thành các sửa đổi trên, hệ thống sẽ sẵn sàng cho:
 
-### Render Video trong Feed
-```text
-1. api-feed trả về: media_urls = [{ url: "https://iframe.videodelivery.net/{uid}", type: "video" }]
-2. MediaGrid detect isStreamVideo = true
-3. Giữ nguyên URL, không gọi getMediaUrl()
-4. LazyVideo detect isStreamUrl() → Render bằng StreamPlayer (HLS)
-```
+1. **Nhắn tin 1-1** giữa bạn bè
+2. **Tạo nhóm chat** với nhiều bạn bè
+3. **Video call** (sẽ cần thêm WebRTC integration)
 
----
+### Kiến trúc Chat đã có sẵn
 
-## Backward Compatibility
+Dự án đã có module Chat (`@fun-ecosystem1/chat`) với:
+- `conversations` table
+- `messages` table
+- `conversation_participants` table
+- Realtime messaging
+- Voice messages
 
-- **Video cũ với Stream URL đầy đủ**: Hoạt động (detect bằng `isStreamVideoUrl`)
-- **Video cũ với UID trần trong DB**: Cần migration script để fix (tùy chọn)
-- **Ảnh R2 với key**: Hoạt động bình thường
-- **Ảnh R2 với full URL cũ**: Hoạt động (backward compatible)
+**Chỉ cần kết nối Friends → Chat** là có thể sử dụng ngay.
 
 ---
 
 ## Kết quả mong đợi
 
-1. Đăng video mới → Feed hiển thị video ngay (không 404)
-2. StreamPlayer load HLS từ Cloudflare Stream
-3. Network không còn request tới `media-funprofile.funecosystem.org/{uid}`
-4. Ảnh R2 vẫn hoạt động bình thường
+1. ✅ Gửi/nhận lời mời kết bạn hoạt động ổn định
+2. ✅ Chấp nhận/từ chối lời mời cập nhật realtime
+3. ✅ Gợi ý bạn bè hiển thị đúng
+4. ✅ Có nút "Nhắn tin" nhanh với bạn bè
+5. ✅ Error handling đầy đủ để dễ debug
 
