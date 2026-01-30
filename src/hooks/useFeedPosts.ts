@@ -1,6 +1,7 @@
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { getMediaUrl } from '@/config/media';
 
 export interface PostStats {
   reactions: { id: string; user_id: string; type: string }[];
@@ -106,12 +107,18 @@ const fetchFeedPage = async (cursor: string | null): Promise<FeedPage> => {
   }
 
   // Transform API response to match existing FeedPage structure
+  // Build full URLs từ keys cho media
   const posts: FeedPost[] = (apiResponse.data || []).map((post) => ({
     id: post.id,
     content: post.content || '',
-    image_url: post.image_url,
-    video_url: post.video_url,
-    media_urls: post.media_urls as Array<{ url: string; type: 'image' | 'video' }> | null,
+    image_url: post.image_url ? getMediaUrl(post.image_url) : null,
+    video_url: post.video_url ? getMediaUrl(post.video_url) : null,
+    media_urls: post.media_urls 
+      ? (post.media_urls as Array<{ url: string; type: 'image' | 'video' }>).map((m) => ({
+          url: getMediaUrl(m.url),
+          type: m.type,
+        })) 
+      : null,
     created_at: post.created_at || new Date().toISOString(),
     user_id: post.user_id,
     profiles: post.profiles,

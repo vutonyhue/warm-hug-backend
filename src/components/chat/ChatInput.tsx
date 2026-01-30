@@ -5,6 +5,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { ImagePlus, Send, X, Smile } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { uploadCommentMedia } from '@/utils/mediaUpload';
+import { getMediaUrl } from '@/config/media';
 import { toast } from 'sonner';
 import { EmojiPicker } from '@/components/feed/EmojiPicker';
 
@@ -74,7 +75,7 @@ export function ChatInput({
       if (mediaFiles.length > 0) {
         const uploadPromises = mediaFiles.map((file) => uploadCommentMedia(file));
         const results = await Promise.all(uploadPromises);
-        uploadedUrls = results.map((r) => r.url);
+        uploadedUrls = results.map((r) => getMediaUrl(r.key));
       }
 
       await onSend(trimmedContent, uploadedUrls.length > 0 ? uploadedUrls : undefined);

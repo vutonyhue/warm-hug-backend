@@ -11,13 +11,12 @@
 import { supabase } from '@/integrations/supabase/client';
 import { compressImage, FILE_LIMITS } from './imageCompression';
 
-// R2 custom domain (dùng cho Cloudflare Image Resizing)
-const R2_CUSTOM_DOMAIN = 'https://media-funprofile.funecosystem.org';
+// Import từ config tập trung - không hardcode domain
+import { MEDIA_BASE_URL } from '@/config/media';
 
 export interface MediaUploadResult {
-  url: string;
   key: string;
-  transformedUrl?: string;
+  // url và transformedUrl removed - frontend sẽ build URL từ key
 }
 
 export interface UploadOptions {
@@ -122,13 +121,9 @@ export async function uploadMedia(
     throw new Error(`Upload thất bại: ${uploadResponse.status}`);
   }
 
-  // Build URLs
-  const rawUrl = `${R2_CUSTOM_DOMAIN}/${key}`;
-  
+  // Chỉ trả về key - frontend sẽ build URL từ key
   return {
-    url: rawUrl,
     key,
-    transformedUrl: rawUrl, // Caller can use imageTransform.ts for transforms
   };
 }
 

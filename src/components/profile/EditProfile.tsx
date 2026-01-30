@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { uploadToR2, deleteFromR2 } from '@/utils/r2Upload';
+import { getMediaUrl } from '@/config/media';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -114,6 +115,7 @@ export const EditProfile = () => {
 
       const file = new File([croppedImageBlob], 'avatar.jpg', { type: 'image/jpeg' });
       const result = await uploadToR2(file, 'avatars', `${userId}/avatar-${Date.now()}.jpg`, session.access_token);
+      const newAvatarUrl = getMediaUrl(result.key);
 
       // Delete old avatar from R2 if exists
       if (avatarUrl) {
@@ -127,12 +129,12 @@ export const EditProfile = () => {
 
       const { error: updateError } = await supabase
         .from('profiles')
-        .update({ avatar_url: result.url })
+        .update({ avatar_url: newAvatarUrl })
         .eq('id', userId);
 
       if (updateError) throw updateError;
 
-      setAvatarUrl(result.url);
+      setAvatarUrl(newAvatarUrl);
       toast.success('Avatar updated successfully!');
     } catch (error) {
       toast.error('Error uploading avatar');
@@ -177,6 +179,7 @@ export const EditProfile = () => {
 
       const coverFile = new File([compressed], 'cover.jpg', { type: 'image/jpeg' });
       const result = await uploadToR2(coverFile, 'avatars', `${userId}/cover-${Date.now()}.jpg`, session.access_token);
+      const newCoverUrl = getMediaUrl(result.key);
 
       // Delete old cover from R2 if exists
       if (coverUrl) {
@@ -190,12 +193,12 @@ export const EditProfile = () => {
 
       const { error: updateError } = await supabase
         .from('profiles')
-        .update({ cover_url: result.url })
+        .update({ cover_url: newCoverUrl })
         .eq('id', userId);
 
       if (updateError) throw updateError;
 
-      setCoverUrl(result.url);
+      setCoverUrl(newCoverUrl);
       toast.success('Ảnh bìa đã được cập nhật!');
     } catch (error) {
       toast.error('Lỗi khi tải ảnh bìa');

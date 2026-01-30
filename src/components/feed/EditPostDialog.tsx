@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { uploadToR2, deleteFromR2 } from '@/utils/r2Upload';
+import { getMediaUrl } from '@/config/media';
 import { deleteStreamVideoByUid, extractStreamUid } from '@/utils/streamHelpers';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -188,10 +189,10 @@ export const EditPostDialog = ({ post, isOpen, onClose, onPostUpdated, currentUs
       // Upload new image if selected
       if (imageFile) {
         const result = await uploadToR2(imageFile, 'posts', undefined, session.access_token);
-        imageUrl = result.url;
+        imageUrl = getMediaUrl(result.key);
         
         // Delete old image from R2 if exists and it's different
-        if (post.image_url && post.image_url !== result.url) {
+        if (post.image_url && post.image_url !== imageUrl) {
           try {
             const oldKey = post.image_url.split('/').slice(-2).join('/');
             await deleteFromR2(oldKey);

@@ -14,7 +14,8 @@ interface MediaUrl {
 
 interface CreatePostRequest {
   content: string;
-  media_urls: MediaUrl[];
+  media_keys?: string[]; // NEW: Array of media keys (preferred)
+  media_urls?: MediaUrl[]; // Keep for backward compatibility
   image_url?: string | null;
   video_url?: string | null;
   location?: string | null;
@@ -90,6 +91,20 @@ Deno.serve(async (req) => {
       );
     }
 
+    // Build media_urls from media_keys if provided (preferred approach)
+    // Or use media_urls directly for backward compatibility
+    let finalMediaUrls: MediaUrl[] = [];
+    if (body.media_keys && body.media_keys.length > 0) {
+      // New approach: convert keys to media_urls format
+      finalMediaUrls = body.media_keys.map(key => ({
+        url: key, // Lưu key thay vì full URL
+        type: (key.includes('videos') ? 'video' : 'image') as 'image' | 'video',
+      }));
+    } else if (body.media_urls && body.media_urls.length > 0) {
+      // Backward compatible: use media_urls directly
+      finalMediaUrls = body.media_urls;
+    }
+
     // Insert post
     console.log("[create-post] Inserting post...");
     const insertStart = Date.now();
@@ -101,7 +116,7 @@ Deno.serve(async (req) => {
         content: body.content?.trim() || "",
         image_url: body.image_url || null,
         video_url: body.video_url || null,
-        media_urls: body.media_urls || [],
+        media_urls: finalMediaUrls,
         location: body.location || null,
       })
       .select("id")
