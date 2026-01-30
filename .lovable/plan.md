@@ -1,179 +1,77 @@
 
-# Kế hoạch: Sửa lỗi "Unauthorized" khi đăng bài
 
-## Nguyên nhân
+# Kế hoạch: Sửa lỗi ảnh không hiển thị sau khi đăng bài
 
-Token JWT đã hết hạn nhưng frontend vẫn sử dụng token cũ từ cache. Logs xác nhận:
-- Lỗi: `token has invalid claims: token is expired`
-- Request thất bại lúc 02:34:53Z  
-- Token được refresh thành công lúc 02:37:07Z (sau khi đã lỗi)
+## Nguyên nhân gốc
+
+**Database lưu URL đúng:**
+```
+https://pub-5609558cd8fc4ca39dab5b2b919f43b1.r2.dev/posts/1769741647732-u730t3oxy8d.webp
+```
+
+**Nhưng code transform URL sai:**
+- File `src/lib/imageTransform.ts` có hardcode bucket ID **cũ/khác**:
+  ```typescript
+  const R2_PUBLIC_URL = 'https://pub-e83e74b0726742fbb6a60bc08f95624b.r2.dev';  // ← SAI
+  ```
+- Bucket thực tế là: `pub-5609558cd8fc4ca39dab5b2b919f43b1` (từ secret)
+
+**Khi transform URL:**
+1. Code kiểm tra `hostname.endsWith('r2.dev')` → TRUE
+2. Chuyển URL thành `https://media.fun.rich/posts/...`
+3. Nhưng `media.fun.rich` có thể không được cấu hình hoặc trỏ sai bucket
+4. Ảnh không load được → `hideOnError` → ảnh biến mất
 
 ## Giải pháp
 
-### Bước 1: Tạo utility function kiểm tra token expiry
+### Cách 1: Cập nhật hardcode URL (Khuyến nghị ngay)
 
-Tạo helper function để kiểm tra session còn hạn hay không trước khi sử dụng.
-
-**File**: `src/utils/authHelpers.ts` (tạo mới)
+Sửa `src/lib/imageTransform.ts` để dùng đúng bucket URL mới:
 
 ```typescript
-// Kiểm tra token có hết hạn hay không (buffer 60s)
-export function isSessionExpired(session: any, bufferSeconds = 60): boolean
+// TRƯỚC (sai)
+const R2_PUBLIC_URL = 'https://pub-e83e74b0726742fbb6a60bc08f95624b.r2.dev';
 
-// Lấy fresh session, tự động refresh nếu cần
-export async function getValidSession(): Promise<Session | null>
+// SAU (đúng - dùng bucket thực tế từ database)
+const R2_PUBLIC_URL = 'https://pub-5609558cd8fc4ca39dab5b2b919f43b1.r2.dev';
 ```
 
-### Bước 2: Cập nhật FacebookCreatePost.tsx
+### Cách 2: Bỏ transform tạm thời
 
-Thay đổi logic lấy session trong `handleSubmit()`:
-
-**Trước (có bug)**:
-- Dùng cached session không kiểm tra expiry
-- Fallback không đủ mạnh
-
-**Sau (đã fix)**:
-- Kiểm tra `expires_at` của cached session
-- Nếu sắp hết hạn (< 60s), force refresh ngay
-- Cập nhật cache sau khi refresh thành công
-
-### Bước 3: Cập nhật r2Upload.ts với retry logic
-
-Thêm retry mechanism cho trường hợp token bị expired giữa chừng:
+Nếu custom domain `media.fun.rich` chưa được cấu hình đúng, tạm thời bỏ transform để ảnh hiển thị:
 
 ```typescript
-// Nếu gặp 401 Unauthorized, thử refresh token và retry 1 lần
-if (response.status === 401) {
-  const newSession = await supabase.auth.refreshSession();
-  // Retry với token mới
-}
+// Trong LazyImage component, thêm skipTransform mặc định
+<LazyImage src={url} skipTransform={true} />
 ```
 
-### Bước 4: Cải thiện cachedSessionRef listener
+### Cách 3: Kiểm tra custom domain (Lâu dài)
 
-Trong `useEffect` subscribe auth state, thêm logic invalidate cache khi token sắp hết hạn.
+Đảm bảo `media.fun.rich` được cấu hình trong Cloudflare R2 bucket settings trỏ đúng bucket.
 
-## Chi tiết kỹ thuật
+## Thay đổi cụ thể
 
-### File 1: `src/utils/authHelpers.ts` (tạo mới)
+### File: `src/lib/imageTransform.ts`
 
+**Line 17** - Cập nhật R2_PUBLIC_URL:
 ```typescript
-import { supabase } from '@/integrations/supabase/client';
-import type { Session } from '@supabase/supabase-js';
+// TRƯỚC
+const R2_PUBLIC_URL = 'https://pub-e83e74b0726742fbb6a60bc08f95624b.r2.dev';
 
-/**
- * Kiểm tra session có hết hạn hoặc sắp hết hạn không
- * @param session - Supabase session object
- * @param bufferSeconds - Số giây buffer trước khi coi là "sắp hết hạn" (mặc định 60s)
- */
-export function isSessionExpired(session: Session | null, bufferSeconds = 60): boolean {
-  if (!session?.expires_at) return true;
-  
-  const expiresAt = session.expires_at * 1000; // Convert to milliseconds
-  const now = Date.now();
-  const bufferMs = bufferSeconds * 1000;
-  
-  return now >= (expiresAt - bufferMs);
-}
-
-/**
- * Lấy valid session, tự động refresh nếu expired hoặc sắp expired
- * @returns Fresh session hoặc null nếu không thể lấy
- */
-export async function getValidSession(): Promise<Session | null> {
-  // Lấy session hiện tại
-  const { data: { session } } = await supabase.auth.getSession();
-  
-  // Nếu không có session
-  if (!session) return null;
-  
-  // Nếu session còn hạn (> 60s), trả về luôn
-  if (!isSessionExpired(session, 60)) {
-    return session;
-  }
-  
-  // Session sắp hết hạn hoặc đã hết, refresh
-  console.log('[Auth] Session expired or expiring soon, refreshing...');
-  const { data: { session: newSession }, error } = await supabase.auth.refreshSession();
-  
-  if (error) {
-    console.error('[Auth] Failed to refresh session:', error.message);
-    return null;
-  }
-  
-  return newSession;
-}
+// SAU
+const R2_PUBLIC_URL = 'https://pub-5609558cd8fc4ca39dab5b2b919f43b1.r2.dev';
 ```
 
-### File 2: `src/components/feed/FacebookCreatePost.tsx`
+## Kiểm tra sau fix
 
-Cập nhật phần lấy session (khoảng lines 309-378):
+1. Refresh trang Feed
+2. Ảnh và video trong các bài post phải hiển thị được
+3. Nếu vẫn lỗi → cần kiểm tra cấu hình custom domain `media.fun.rich`
 
-```typescript
-// === OPTIMIZED SESSION RETRIEVAL WITH EXPIRY CHECK ===
-import { isSessionExpired, getValidSession } from '@/utils/authHelpers';
+## Tóm tắt
 
-// Trong handleSubmit():
-let session = cachedSessionRef.current;
+| Vấn đề | Giải pháp |
+|--------|-----------|
+| Hardcode bucket URL sai | Cập nhật `R2_PUBLIC_URL` trong `imageTransform.ts` |
+| Custom domain có thể chưa cấu hình | Dùng trực tiếp URL gốc từ R2 nếu cần |
 
-// CHECK EXPIRY trước khi dùng cached session
-if (session && isSessionExpired(session, 60)) {
-  console.log('[CreatePost] Cached session expired, invalidating...');
-  session = null;
-  cachedSessionRef.current = null;
-}
-
-if (session) {
-  console.log('[CreatePost] Using valid cached session');
-} else {
-  // Get fresh valid session (auto-refresh if needed)
-  session = await getValidSession();
-  if (session) {
-    cachedSessionRef.current = session;
-  }
-}
-```
-
-### File 3: `src/utils/r2Upload.ts`
-
-Thêm retry logic khi gặp 401:
-
-```typescript
-async function getPresignedUrl(
-  key: string,
-  contentType: string,
-  fileSize: number,
-  accessToken?: string,
-  timeoutMs: number = 30000,
-  retryCount = 0 // Thêm retry counter
-): Promise<{ uploadUrl: string; publicUrl: string }> {
-  // ... existing code ...
-  
-  if (!response.ok) {
-    // Nếu 401 và chưa retry, thử refresh và retry
-    if (response.status === 401 && retryCount === 0) {
-      console.log('[R2Upload] Token expired, refreshing and retrying...');
-      const { data: { session } } = await supabase.auth.refreshSession();
-      if (session) {
-        return getPresignedUrl(key, contentType, fileSize, session.access_token, timeoutMs, 1);
-      }
-    }
-    // ... existing error handling ...
-  }
-}
-```
-
-## Tóm tắt thay đổi
-
-| File | Thay đổi |
-|------|----------|
-| `src/utils/authHelpers.ts` | Tạo mới - utilities kiểm tra và refresh session |
-| `src/components/feed/FacebookCreatePost.tsx` | Thêm kiểm tra expiry cho cached session |
-| `src/utils/r2Upload.ts` | Thêm retry logic khi gặp 401 |
-
-## Kết quả mong đợi
-
-- Không còn lỗi "Unauthorized" khi đăng bài
-- Token được refresh tự động trước khi hết hạn
-- Nếu vẫn gặp 401, tự động retry sau khi refresh
-- Video và ảnh upload hoạt động bình thường
