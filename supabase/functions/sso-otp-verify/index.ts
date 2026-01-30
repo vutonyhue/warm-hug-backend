@@ -32,8 +32,8 @@ Deno.serve(async (req: Request) => {
     const { data: otpRecord, error: fetchError } = await supabase
       .from('otp_codes')
       .select('*')
-      .eq('identifier', identifier.toLowerCase())
-      .eq('is_used', false)
+      .eq('email', identifier.toLowerCase())
+      .eq('used', false)
       .gt('expires_at', new Date().toISOString())
       .order('created_at', { ascending: false })
       .limit(1)
@@ -47,31 +47,12 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // Check max attempts
-    if (otpRecord.attempts >= otpRecord.max_attempts) {
-      await supabase
-        .from('otp_codes')
-        .update({ is_used: true })
-        .eq('id', otpRecord.id);
-
-      return new Response(
-        JSON.stringify({ success: false, error: 'Too many failed attempts. Please request a new OTP.' }),
-        { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
     // Verify OTP
     if (otpRecord.code !== code) {
-      await supabase
-        .from('otp_codes')
-        .update({ attempts: otpRecord.attempts + 1 })
-        .eq('id', otpRecord.id);
-
       return new Response(
         JSON.stringify({ 
           success: false, 
-          error: 'Invalid OTP code',
-          attempts_remaining: otpRecord.max_attempts - otpRecord.attempts - 1
+          error: 'Invalid OTP code'
         }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
@@ -82,19 +63,17 @@ Deno.serve(async (req: Request) => {
     // Mark OTP as used
     await supabase
       .from('otp_codes')
-      .update({ is_used: true })
+      .update({ used: true })
       .eq('id', otpRecord.id);
 
-    // Determine user email
-    const userEmail = otpRecord.type === 'email' 
-      ? identifier.toLowerCase() 
-      : `${identifier.replace(/[^0-9]/g, '')}@phone.local`;
+    // Determine user email (always use email since that's what we store)
+    const userEmail = identifier.toLowerCase();
 
     // Rate limit OTP verification attempts (separate from generation)
     const verifyRateLimit = await supabase.rpc('check_rate_limit', {
-      p_key: `otp_verify:${identifier.toLowerCase()}`,
-      p_limit: 10,
-      p_window_ms: 3600000 // 1 hour
+      rate_key: `otp_verify:${identifier.toLowerCase()}`,
+      max_count: 10,
+      window_ms: 3600000 // 1 hour
     });
     
     if (verifyRateLimit.data && !verifyRateLimit.data.allowed) {

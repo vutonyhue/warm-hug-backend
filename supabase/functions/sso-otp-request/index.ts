@@ -16,9 +16,9 @@ async function checkDatabaseRateLimit(supabase: any, identifier: string): Promis
   
   try {
     const { data, error } = await supabase.rpc('check_rate_limit', {
-      p_key: rateLimitKey,
-      p_limit: OTP_RATE_LIMIT,
-      p_window_ms: OTP_RATE_WINDOW_MS
+      rate_key: rateLimitKey,
+      max_count: OTP_RATE_LIMIT,
+      window_ms: OTP_RATE_WINDOW_MS
     });
     
     if (error) {
@@ -102,20 +102,17 @@ Deno.serve(async (req: Request) => {
     await supabase
       .from('otp_codes')
       .delete()
-      .eq('identifier', identifier.toLowerCase())
-      .eq('is_used', false);
+      .eq('email', identifier.toLowerCase())
+      .eq('used', false);
 
     // Store OTP in database
     const { error: insertError } = await supabase
       .from('otp_codes')
       .insert({
-        identifier: identifier.toLowerCase(),
+        email: identifier.toLowerCase(),
         code: otp,
-        type: type,
         expires_at: expiresAt,
-        is_used: false,
-        attempts: 0,
-        max_attempts: 5
+        used: false
       });
 
     if (insertError) {
