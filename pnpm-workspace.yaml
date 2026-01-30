@@ -1,0 +1,12 @@
+# pnpm Workspace Configuration
+# Fun Ecosystem Monorepo
+# 
+# This enables parallel development across teams:
+# - packages/chat/     → Team Chat
+# - packages/wallet/   → Team Wallet (future)
+# - packages/game/     → Team Game (future)
+# - sdk-package/       → SSO SDK
+
+packages:
+  - 'packages/*'
+  - 'sdk-package'
