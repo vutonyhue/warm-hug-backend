@@ -1,282 +1,428 @@
 
+# Kế hoạch: Thêm tính năng Voice Message vào packages/chat/
 
-# Kế hoạch: Tạo Package @fun/core
+## Mục đích Demo
 
-## Tổng quan
-
-Package `@fun/core` sẽ chứa tất cả types, hooks, và utilities dùng chung cho mọi module trong Fun Ecosystem (Chat, Wallet, Game...). Đây là foundation package mà các module khác sẽ phụ thuộc.
-
-## Phân tích hiện trạng
-
-### Files cần di chuyển vào @fun/core
-
-| Loại | File nguồn | Mô tả |
-|------|------------|-------|
-| **Utils** | `src/lib/utils.ts` | Hàm `cn()` merge Tailwind classes |
-| **Utils** | `src/lib/formatters.ts` | formatNumber, formatDate, formatRelativeTime, shortenAddress |
-| **Hooks** | `src/hooks/use-mobile.tsx` | useIsMobile, useIsMobileOrTablet |
-| **Hooks** | `src/hooks/useDebounce.ts` | Debounce hook cho search/input |
-| **Hooks** | `src/hooks/useIntersectionObserver.ts` | Lazy loading, scroll animations |
-| **i18n** | `src/i18n/LanguageContext.tsx` | LanguageProvider, useLanguage |
-| **i18n** | `src/i18n/translations.ts` | 5500+ dòng translations (en/vi) |
-| **Types** | `src/types/auth.ts` | AuthUser, AuthSession, OtpLoginResult |
-| **Types** | `src/types/posts.ts` | Post, Comment, Reaction types |
-| **Auth** | `src/utils/authHelpers.ts` | isSessionExpired, getValidSession |
+Minh họa cách **Team Chat làm việc độc lập** trong thư mục `packages/chat/` mà không ảnh hưởng đến các phần khác của dự án. Tất cả thay đổi sẽ chỉ nằm trong `packages/chat/src/`.
 
 ---
 
-## Cấu trúc Package
+## Tổng quan tính năng Voice Message
+
+Cho phép người dùng:
+1. **Nhấn giữ nút micro** để ghi âm tin nhắn giọng nói
+2. **Xem preview** trước khi gửi (có thể nghe lại, hủy, hoặc gửi)
+3. **Phát lại** voice message trong cuộc hội thoại
+
+---
+
+## Cấu trúc files thay đổi (CHỈ trong packages/chat/)
 
 ```text
-packages/core/
-├── package.json
-├── tsconfig.json
-├── rollup.config.js
-├── README.md
-│
-└── src/
-    ├── index.ts                    # Main entry point
-    │
-    ├── utils/
-    │   ├── index.ts
-    │   ├── cn.ts                   # Tailwind class merger
-    │   ├── formatters.ts           # Number/date/address formatters
-    │   └── auth.ts                 # Session validation helpers
-    │
-    ├── hooks/
-    │   ├── index.ts
-    │   ├── use-mobile.ts           # Responsive hooks
-    │   ├── use-debounce.ts         # Debounce value
-    │   └── use-intersection.ts     # Intersection observer
-    │
-    ├── i18n/
-    │   ├── index.ts
-    │   ├── context.tsx             # LanguageProvider
-    │   ├── translations.ts         # All translations
-    │   └── types.ts                # Language types
-    │
-    └── types/
-        ├── index.ts
-        ├── auth.ts                 # Authentication types
-        ├── posts.ts                # Post/Feed types
-        └── common.ts               # Shared common types
+packages/chat/src/
+├── components/
+│   ├── ChatInput.tsx          # ← Sửa: thêm VoiceRecordButton
+│   ├── VoiceRecordButton.tsx  # ← MỚI: Component ghi âm
+│   ├── VoicePreview.tsx       # ← MỚI: Preview trước khi gửi
+│   ├── VoicePlayer.tsx        # ← MỚI: Phát voice trong bubble
+│   └── MessageBubble.tsx      # ← Sửa: hiển thị VoicePlayer
+├── hooks/
+│   └── useVoiceRecorder.ts    # ← MỚI: Hook quản lý ghi âm
+├── types.ts                   # ← Sửa: thêm media_type 'voice'
+└── index.ts                   # ← Sửa: export components mới
 ```
 
 ---
 
 ## Chi tiết Implementation
 
-### 1. Package Configuration
+### 1. Hook: useVoiceRecorder.ts (MỚI)
 
-**packages/core/package.json**
-```json
-{
-  "name": "@fun-ecosystem/core",
-  "version": "1.0.0",
-  "description": "Core utilities, hooks, and types for Fun Ecosystem",
-  "type": "module",
-  "main": "dist/index.cjs.js",
-  "module": "dist/index.esm.js",
-  "types": "dist/index.d.ts",
-  "exports": {
-    ".": {
-      "import": "./dist/index.esm.js",
-      "require": "./dist/index.cjs.js",
-      "types": "./dist/index.d.ts"
-    },
-    "./utils": {
-      "import": "./dist/utils/index.js",
-      "types": "./dist/utils/index.d.ts"
-    },
-    "./hooks": {
-      "import": "./dist/hooks/index.js",
-      "types": "./dist/hooks/index.d.ts"
-    },
-    "./i18n": {
-      "import": "./dist/i18n/index.js",
-      "types": "./dist/i18n/index.d.ts"
-    },
-    "./types": {
-      "import": "./dist/types/index.js",
-      "types": "./dist/types/index.d.ts"
-    }
-  },
-  "peerDependencies": {
-    "react": "^18.0.0",
-    "clsx": "^2.0.0",
-    "tailwind-merge": "^2.0.0"
-  }
+Hook quản lý toàn bộ logic ghi âm sử dụng Web Audio API.
+
+```typescript
+// packages/chat/src/hooks/useVoiceRecorder.ts
+
+interface VoiceRecorderState {
+  isRecording: boolean;
+  duration: number;
+  audioBlob: Blob | null;
+  audioUrl: string | null;
+}
+
+interface UseVoiceRecorderReturn {
+  state: VoiceRecorderState;
+  startRecording: () => Promise<void>;
+  stopRecording: () => void;
+  cancelRecording: () => void;
+  clearRecording: () => void;
+}
+
+export function useVoiceRecorder(): UseVoiceRecorderReturn {
+  // State management
+  const [isRecording, setIsRecording] = useState(false);
+  const [duration, setDuration] = useState(0);
+  const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
+  
+  // Refs for MediaRecorder
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const timerRef = useRef<number>();
+
+  const startRecording = async () => {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const mediaRecorder = new MediaRecorder(stream);
+    
+    mediaRecorder.ondataavailable = (e) => {
+      chunksRef.current.push(e.data);
+    };
+    
+    mediaRecorder.onstop = () => {
+      const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
+      setAudioBlob(blob);
+      // Cleanup stream
+      stream.getTracks().forEach(track => track.stop());
+    };
+    
+    mediaRecorder.start();
+    setIsRecording(true);
+    
+    // Duration timer
+    timerRef.current = window.setInterval(() => {
+      setDuration(d => d + 1);
+    }, 1000);
+  };
+
+  const stopRecording = () => {
+    mediaRecorderRef.current?.stop();
+    clearInterval(timerRef.current);
+    setIsRecording(false);
+  };
+
+  // ... cancelRecording, clearRecording
 }
 ```
 
-### 2. Entry Points
+### 2. Component: VoiceRecordButton.tsx (MỚI)
 
-**Main entry (index.ts)**
+Nút micro trong ChatInput - nhấn giữ để ghi âm.
+
 ```typescript
-// Utils
-export { cn } from './utils/cn';
-export * from './utils/formatters';
-export * from './utils/auth';
+// packages/chat/src/components/VoiceRecordButton.tsx
 
-// Hooks
-export { useIsMobile, useIsMobileOrTablet } from './hooks/use-mobile';
-export { useDebounce } from './hooks/use-debounce';
-export { useIntersectionObserver } from './hooks/use-intersection';
+interface VoiceRecordButtonProps {
+  onRecordingComplete: (blob: Blob, duration: number) => void;
+  disabled?: boolean;
+}
 
-// i18n
-export { LanguageProvider, useLanguage } from './i18n/context';
-export { translations } from './i18n/translations';
-export type { Language, TranslationKey } from './i18n/types';
-
-// Types
-export type * from './types/auth';
-export type * from './types/posts';
-export type * from './types/common';
-```
-
-### 3. Các Module chi tiết
-
-**utils/cn.ts** - Class merger cho Tailwind
-```typescript
-import { clsx, type ClassValue } from 'clsx';
-import { twMerge } from 'tailwind-merge';
-
-export function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
+export function VoiceRecordButton({ 
+  onRecordingComplete, 
+  disabled 
+}: VoiceRecordButtonProps) {
+  const { state, startRecording, stopRecording, cancelRecording } = useVoiceRecorder();
+  
+  return (
+    <button
+      className={cn(
+        "p-2 rounded-full transition-all",
+        state.isRecording 
+          ? "bg-red-500 text-white animate-pulse" 
+          : "hover:bg-accent"
+      )}
+      onMouseDown={startRecording}
+      onMouseUp={() => {
+        stopRecording();
+        if (state.audioBlob) {
+          onRecordingComplete(state.audioBlob, state.duration);
+        }
+      }}
+      onMouseLeave={cancelRecording} // Hủy nếu kéo chuột ra
+      disabled={disabled}
+    >
+      <Mic className="h-5 w-5" />
+      {state.isRecording && (
+        <span className="ml-1 text-xs">{formatDuration(state.duration)}</span>
+      )}
+    </button>
+  );
 }
 ```
 
-**utils/formatters.ts** - Formatting utilities
+### 3. Component: VoicePreview.tsx (MỚI)
+
+Preview voice message trước khi gửi.
+
 ```typescript
-export const formatNumber = (num: number, decimals?: number): string => {...}
-export const formatUsd = (num: number): string => {...}
-export const formatTokenBalance = (num: number): string => {...}
-export const formatDate = (dateString: string): string => {...}
-export const formatRelativeTime = (dateString: string): string => {...}
-export const formatDurationTime = (seconds: number): string => {...}
-export const shortenAddress = (address: string, chars?: number): string => {...}
+// packages/chat/src/components/VoicePreview.tsx
+
+interface VoicePreviewProps {
+  audioUrl: string;
+  duration: number;
+  onSend: () => void;
+  onCancel: () => void;
+  isSending: boolean;
+}
+
+export function VoicePreview({
+  audioUrl,
+  duration,
+  onSend,
+  onCancel,
+  isSending,
+}: VoicePreviewProps) {
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+
+  return (
+    <div className="flex items-center gap-3 p-3 bg-muted rounded-lg">
+      {/* Play/Pause button */}
+      <button onClick={togglePlay} className="p-2 rounded-full bg-primary text-white">
+        {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+      </button>
+      
+      {/* Waveform visualization (simplified) */}
+      <div className="flex-1 h-8 bg-background rounded flex items-center px-2">
+        <div className="w-full h-1 bg-primary/30 rounded relative">
+          <div 
+            className="absolute h-full bg-primary rounded" 
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+      </div>
+      
+      {/* Duration */}
+      <span className="text-sm text-muted-foreground">{formatDuration(duration)}</span>
+      
+      {/* Actions */}
+      <button onClick={onCancel} className="p-2 hover:bg-background rounded-full">
+        <Trash2 className="h-4 w-4 text-destructive" />
+      </button>
+      <button 
+        onClick={onSend} 
+        disabled={isSending}
+        className="p-2 bg-primary text-white rounded-full"
+      >
+        <Send className="h-4 w-4" />
+      </button>
+      
+      <audio ref={audioRef} src={audioUrl} />
+    </div>
+  );
+}
 ```
 
-**hooks/use-debounce.ts** - Debounce hook
+### 4. Component: VoicePlayer.tsx (MỚI)
+
+Phát voice message trong MessageBubble.
+
 ```typescript
-export function useDebounce<T>(value: T, delay: number): T {...}
+// packages/chat/src/components/VoicePlayer.tsx
+
+interface VoicePlayerProps {
+  url: string;
+  duration?: number;
+  isOwn: boolean;
+}
+
+export function VoicePlayer({ url, duration, isOwn }: VoicePlayerProps) {
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+
+  return (
+    <div className={cn(
+      "flex items-center gap-2 min-w-[200px]",
+      isOwn ? "text-primary-foreground" : ""
+    )}>
+      <button 
+        onClick={togglePlay}
+        className="p-2 rounded-full bg-background/20"
+      >
+        {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+      </button>
+      
+      {/* Progress bar */}
+      <div className="flex-1 h-1 bg-background/30 rounded">
+        <div 
+          className="h-full bg-current rounded transition-all" 
+          style={{ width: `${progress}%` }}
+        />
+      </div>
+      
+      {/* Time */}
+      <span className="text-xs opacity-70">
+        {formatDuration(isPlaying ? currentTime : (duration || 0))}
+      </span>
+      
+      <audio ref={audioRef} src={url} />
+    </div>
+  );
+}
 ```
 
-**hooks/use-mobile.ts** - Responsive detection
+### 5. Cập nhật ChatInput.tsx
+
+Thêm VoiceRecordButton và VoicePreview.
+
 ```typescript
-export function useIsMobile(): boolean {...}
-export function useIsMobileOrTablet(): boolean {...}
+// Thay đổi trong ChatInput.tsx
+
+import { VoiceRecordButton } from './VoiceRecordButton';
+import { VoicePreview } from './VoicePreview';
+
+export function ChatInput({ ... }) {
+  // Thêm state cho voice
+  const [voiceBlob, setVoiceBlob] = useState<Blob | null>(null);
+  const [voiceDuration, setVoiceDuration] = useState(0);
+  const [voicePreviewUrl, setVoicePreviewUrl] = useState<string | null>(null);
+
+  const handleVoiceRecorded = (blob: Blob, duration: number) => {
+    setVoiceBlob(blob);
+    setVoiceDuration(duration);
+    setVoicePreviewUrl(URL.createObjectURL(blob));
+  };
+
+  const handleSendVoice = async () => {
+    if (!voiceBlob || !uploadMedia) return;
+    
+    // Convert blob to File và upload
+    const file = new File([voiceBlob], 'voice.webm', { type: 'audio/webm' });
+    const { url } = await uploadMedia(file);
+    
+    await onSend('', [url]); // Gửi như media với type 'voice'
+    clearVoice();
+  };
+
+  return (
+    <div className={cn("border-t bg-card p-3", className)}>
+      {/* Voice Preview (khi đã ghi âm xong) */}
+      {voicePreviewUrl && (
+        <VoicePreview
+          audioUrl={voicePreviewUrl}
+          duration={voiceDuration}
+          onSend={handleSendVoice}
+          onCancel={clearVoice}
+          isSending={isSending}
+        />
+      )}
+
+      {/* Normal input area (ẩn khi có voice preview) */}
+      {!voicePreviewUrl && (
+        <div className="flex items-end gap-2">
+          {/* ... existing buttons ... */}
+          
+          {/* NEW: Voice Record Button */}
+          <VoiceRecordButton
+            onRecordingComplete={handleVoiceRecorded}
+            disabled={isDisabled || mediaFiles.length > 0}
+          />
+          
+          {/* ... textarea và send button ... */}
+        </div>
+      )}
+    </div>
+  );
+}
 ```
 
-**hooks/use-intersection.ts** - Intersection observer
+### 6. Cập nhật MessageBubble.tsx
+
+Hiển thị VoicePlayer cho voice messages.
+
 ```typescript
-export function useIntersectionObserver<T extends HTMLElement>(
-  options?: UseIntersectionObserverOptions
-): [RefObject<T>, boolean] {...}
+// Thêm vào MessageBubble.tsx
+
+import { VoicePlayer } from './VoicePlayer';
+
+// Trong phần render media:
+{message.media_type === 'voice' && message.media_url && (
+  <VoicePlayer 
+    url={message.media_url} 
+    isOwn={isOwn}
+  />
+)}
+
+// Với image/video thì giữ nguyên logic cũ
+{message.media_type !== 'voice' && mediaUrls.length > 0 && (
+  // ... existing image rendering
+)}
 ```
 
-**i18n/context.tsx** - Language system
+### 7. Cập nhật types.ts
+
+Mở rộng media_type để bao gồm 'voice'.
+
 ```typescript
-export const LanguageProvider: React.FC<{children: ReactNode}> = ({children}) => {...}
-export const useLanguage = (): LanguageContextType => {...}
+// Trong Message interface
+export interface Message {
+  // ... existing fields
+  media_type: 'image' | 'video' | 'voice' | null;
+  voice_duration?: number; // Optional: thời lượng voice
+}
 ```
 
-**types/auth.ts** - Auth types
-```typescript
-export interface AuthUser {...}
-export interface AuthSession {...}
-export interface OtpLoginResult {...}
-export interface Web3AuthResult {...}
-export type AuthMethod = 'email' | 'wallet' | 'google';
-```
+### 8. Cập nhật index.ts (exports)
 
-**types/posts.ts** - Feed types
 ```typescript
-export interface Post {...}
-export interface Comment {...}
-export interface PostReaction {...}
-export type ReactionType = 'like' | 'love' | 'haha' | 'wow' | 'sad' | 'angry';
+// Thêm exports mới
+export { VoiceRecordButton } from './components/VoiceRecordButton';
+export { VoicePreview } from './components/VoicePreview';
+export { VoicePlayer } from './components/VoicePlayer';
+export { useVoiceRecorder } from './hooks/useVoiceRecorder';
 ```
 
 ---
 
-## Cách sử dụng trong các modules khác
+## Files được tạo/sửa (CHỈ trong packages/chat/)
 
-### Trong @fun-ecosystem/chat
-```typescript
-// Cập nhật imports
-import { cn } from '@fun-ecosystem/core';
-import { useDebounce } from '@fun-ecosystem/core/hooks';
-import { useLanguage } from '@fun-ecosystem/core/i18n';
-```
-
-### Trong App chính (src/)
-```typescript
-// Direct import
-import { cn, formatNumber, useIsMobile } from '@fun-ecosystem/core';
-import { useLanguage, LanguageProvider } from '@fun-ecosystem/core/i18n';
-import type { AuthUser, Post } from '@fun-ecosystem/core/types';
-```
-
-### Trong tương lai @fun/wallet
-```typescript
-import { cn, shortenAddress, formatTokenBalance } from '@fun-ecosystem/core';
-import { useIsMobile } from '@fun-ecosystem/core/hooks';
-```
+| File | Hành động | Mô tả |
+|------|-----------|-------|
+| `packages/chat/src/hooks/useVoiceRecorder.ts` | Tạo mới | Hook ghi âm |
+| `packages/chat/src/components/VoiceRecordButton.tsx` | Tạo mới | Nút ghi âm |
+| `packages/chat/src/components/VoicePreview.tsx` | Tạo mới | Preview voice |
+| `packages/chat/src/components/VoicePlayer.tsx` | Tạo mới | Phát voice |
+| `packages/chat/src/components/ChatInput.tsx` | Sửa | Tích hợp voice |
+| `packages/chat/src/components/MessageBubble.tsx` | Sửa | Hiển thị voice |
+| `packages/chat/src/types.ts` | Sửa | Thêm voice type |
+| `packages/chat/src/index.ts` | Sửa | Export mới |
 
 ---
 
-## Files cần tạo
+## Minh họa Workflow Team Chat
 
-| File | Mô tả |
-|------|-------|
-| `packages/core/package.json` | Package configuration |
-| `packages/core/tsconfig.json` | TypeScript config |
-| `packages/core/rollup.config.js` | Build configuration |
-| `packages/core/README.md` | Documentation |
-| `packages/core/src/index.ts` | Main entry point |
-| `packages/core/src/utils/index.ts` | Utils entry |
-| `packages/core/src/utils/cn.ts` | Class merger |
-| `packages/core/src/utils/formatters.ts` | Formatters |
-| `packages/core/src/utils/auth.ts` | Auth helpers |
-| `packages/core/src/hooks/index.ts` | Hooks entry |
-| `packages/core/src/hooks/use-mobile.ts` | Mobile detection |
-| `packages/core/src/hooks/use-debounce.ts` | Debounce |
-| `packages/core/src/hooks/use-intersection.ts` | Intersection observer |
-| `packages/core/src/i18n/index.ts` | i18n entry |
-| `packages/core/src/i18n/context.tsx` | Language provider |
-| `packages/core/src/i18n/translations.ts` | Translations |
-| `packages/core/src/i18n/types.ts` | Language types |
-| `packages/core/src/types/index.ts` | Types entry |
-| `packages/core/src/types/auth.ts` | Auth types |
-| `packages/core/src/types/posts.ts` | Post types |
-| `packages/core/src/types/common.ts` | Common types |
+Demo này thể hiện rõ:
+
+1. **Phạm vi làm việc rõ ràng**: Tất cả thay đổi chỉ trong `packages/chat/src/`
+2. **Không ảnh hưởng code khác**: Không chạm vào `src/`, `packages/core/`, hay bất kỳ module nào khác
+3. **Self-contained**: Voice feature hoàn toàn nằm trong chat module
+4. **Dependency Injection**: Upload function được inject từ host app qua `ChatProvider`
 
 ---
 
-## Lợi ích
-
-| Lợi ích | Mô tả |
-|---------|-------|
-| **DRY** | Không duplicate code giữa Chat, Wallet, Game |
-| **Type Safety** | Shared types đảm bảo consistency |
-| **i18n centralized** | Một nơi quản lý tất cả translations |
-| **Easy updates** | Cập nhật utility 1 lần, apply cho toàn bộ |
-| **Independent testing** | Unit test riêng cho core functions |
-
----
-
-## Dependency Graph sau khi hoàn thành
+## Luồng hoạt động
 
 ```text
-@fun-ecosystem/core (foundation)
-       │
-       ├── @fun-ecosystem/chat (depends on core)
-       │
-       ├── @fun-ecosystem/wallet (depends on core)
-       │
-       └── @fun-ecosystem/game (depends on core)
-              │
-              └── apps/web (imports all)
+┌─────────────────────────────────────────────────────────────┐
+│                      ChatInput                               │
+│  ┌─────────┐  ┌─────────┐  ┌──────────────┐  ┌───────────┐ │
+│  │ 📷 Image│  │ 😀 Emoji│  │ 🎤 Voice Btn │  │  Textarea │ │
+│  └─────────┘  └─────────┘  └──────────────┘  └───────────┘ │
+│                                    │                         │
+│                          Nhấn giữ để ghi âm                  │
+│                                    ▼                         │
+│  ┌─────────────────────────────────────────────────────────┐│
+│  │              VoicePreview (sau khi ghi xong)            ││
+│  │   ▶️ ═══════════════════════ 0:15   🗑️  📤           ││
+│  └─────────────────────────────────────────────────────────┘│
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼ Gửi
+┌─────────────────────────────────────────────────────────────┐
+│                    MessageBubble (voice)                     │
+│  ┌─────────────────────────────────────────────────────────┐│
+│  │   ▶️ ════════════════════  0:15                        ││
+│  │                                      VoicePlayer        ││
+│  └─────────────────────────────────────────────────────────┘│
+│                                                 10:30 ✓✓    │
+└─────────────────────────────────────────────────────────────┘
 ```
-
