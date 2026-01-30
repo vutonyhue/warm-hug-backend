@@ -1,7 +1,8 @@
-import { useState, useEffect, useMemo } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { vi } from 'date-fns/locale';
+import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { uploadCommentMedia } from '@/utils/mediaUpload';
 import { getMediaUrl } from '@/config/media';
@@ -32,10 +33,15 @@ import {
 
 export default function Chat() {
   const { conversationId } = useParams<{ conversationId?: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const isMobileOrTablet = useIsMobileOrTablet();
   const queryClient = useQueryClient();
+  
+  // Get target user from query param ?user=xxx
+  const targetUserId = searchParams.get('user');
+  const clearTargetUser = () => setSearchParams({});
   
   const [userId, setUserId] = useState<string | null>(null);
   const [username, setUsername] = useState<string | null>(null);
@@ -101,6 +107,8 @@ export default function Chat() {
     <ChatProvider config={chatConfig}>
       <ChatContent 
         conversationId={conversationId}
+        targetUserId={targetUserId}
+        clearTargetUser={clearTargetUser}
         isMobileOrTablet={isMobileOrTablet}
         showNewConversation={showNewConversation}
         setShowNewConversation={setShowNewConversation}
@@ -116,6 +124,8 @@ export default function Chat() {
 // Tách ChatContent để sử dụng hooks từ ChatProvider
 interface ChatContentProps {
   conversationId?: string;
+  targetUserId?: string | null;
+  clearTargetUser: () => void;
   isMobileOrTablet: boolean;
   showNewConversation: boolean;
   setShowNewConversation: (show: boolean) => void;
@@ -127,6 +137,8 @@ interface ChatContentProps {
 
 function ChatContent({
   conversationId,
+  targetUserId,
+  clearTargetUser,
   isMobileOrTablet,
   showNewConversation,
   setShowNewConversation,
@@ -136,6 +148,7 @@ function ChatContent({
   setShowSettings,
 }: ChatContentProps) {
   const navigate = useNavigate();
+  const isCreatingRef = useRef(false);
   
   // Sử dụng hooks từ package chat - lấy userId từ context
   const { conversations, isLoading, createDirectConversation } = useConversations();
@@ -143,6 +156,47 @@ function ChatContent({
   
   // Enable chat notifications
   useChatNotifications(conversationId || null);
+
+  // Auto-create conversation when targetUserId is provided from ?user=xxx
+  useEffect(() => {
+    if (!targetUserId || isLoading || isCreatingRef.current) return;
+    
+    console.log('[Chat] Processing targetUserId:', targetUserId);
+    
+    // Check if conversation already exists with this user
+    const existingConv = conversations.find(conv => 
+      conv.type === 'direct' && 
+      conv.participants?.some(p => p.user_id === targetUserId)
+    );
+    
+    if (existingConv) {
+      console.log('[Chat] Found existing conversation:', existingConv.id);
+      navigate(`/chat/${existingConv.id}`, { replace: true });
+      clearTargetUser();
+      return;
+    }
+    
+    // Create new conversation
+    const createChat = async () => {
+      isCreatingRef.current = true;
+      try {
+        console.log('[Chat] Creating new conversation with:', targetUserId);
+        const result = await createDirectConversation.mutateAsync(targetUserId);
+        if (result) {
+          console.log('[Chat] Created conversation:', result.id);
+          navigate(`/chat/${result.id}`, { replace: true });
+        }
+      } catch (error) {
+        console.error('[Chat] Error creating conversation:', error);
+        toast.error('Không thể tạo cuộc trò chuyện');
+      } finally {
+        clearTargetUser();
+        isCreatingRef.current = false;
+      }
+    };
+    
+    createChat();
+  }, [targetUserId, isLoading, conversations, createDirectConversation, navigate, clearTargetUser]);
 
   const handleSelectConversation = (id: string) => {
     navigate(`/chat/${id}`);
@@ -153,17 +207,27 @@ function ChatContent({
   };
 
   const handleNewConversation = async (otherUserId: string) => {
-    const result = await createDirectConversation.mutateAsync(otherUserId);
-    if (result) {
-      navigate(`/chat/${result.id}`);
+    try {
+      const result = await createDirectConversation.mutateAsync(otherUserId);
+      if (result) {
+        navigate(`/chat/${result.id}`);
+      }
+    } catch (error) {
+      console.error('[Chat] Error creating conversation:', error);
+      toast.error('Không thể tạo cuộc trò chuyện');
     }
     setShowNewConversation(false);
   };
 
   const handleCreateGroup = async (name: string, memberIds: string[]) => {
-    const result = await createGroupConversation.mutateAsync({ name, memberIds });
-    if (result) {
-      navigate(`/chat/${result.id}`);
+    try {
+      const result = await createGroupConversation.mutateAsync({ name, memberIds });
+      if (result) {
+        navigate(`/chat/${result.id}`);
+      }
+    } catch (error) {
+      console.error('[Chat] Error creating group:', error);
+      toast.error('Không thể tạo nhóm');
     }
     setShowCreateGroup(false);
   };
