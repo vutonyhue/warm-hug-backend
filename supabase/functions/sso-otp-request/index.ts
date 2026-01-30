@@ -131,7 +131,7 @@ Deno.serve(async (req: Request) => {
       try {
         const resend = new Resend(resendApiKey);
         const { error: emailError } = await resend.emails.send({
-          from: "FUN Ecosystem <noreply@fun.rich>",
+          from: "FUN Ecosystem <noreply@profile.funecosystem.org>",
           to: [identifier],
           subject: "🔐 Mã xác thực OTP của bạn - FUN Ecosystem",
           html: `
