@@ -1,428 +1,243 @@
 
-# Kế hoạch: Thêm tính năng Voice Message vào packages/chat/
 
-## Mục đích Demo
+# Kế hoạch: Tích hợp Package Chat vào Fun Profile
 
-Minh họa cách **Team Chat làm việc độc lập** trong thư mục `packages/chat/` mà không ảnh hưởng đến các phần khác của dự án. Tất cả thay đổi sẽ chỉ nằm trong `packages/chat/src/`.
+## Mục tiêu
 
----
+Sửa `src/pages/Chat.tsx` để sử dụng `ChatProvider` và components từ `packages/chat/` thay vì các components local trong `src/components/chat/`. Điều này sẽ:
 
-## Tổng quan tính năng Voice Message
-
-Cho phép người dùng:
-1. **Nhấn giữ nút micro** để ghi âm tin nhắn giọng nói
-2. **Xem preview** trước khi gửi (có thể nghe lại, hủy, hoặc gửi)
-3. **Phát lại** voice message trong cuộc hội thoại
+1. Kích hoạt tính năng **Voice Message** đã có trong package
+2. Thống nhất codebase - chỉ duy trì 1 nơi (package)
+3. Đúng pattern SDK với Dependency Injection
 
 ---
 
-## Cấu trúc files thay đổi (CHỈ trong packages/chat/)
+## Cấu trúc thay đổi
 
 ```text
-packages/chat/src/
-├── components/
-│   ├── ChatInput.tsx          # ← Sửa: thêm VoiceRecordButton
-│   ├── VoiceRecordButton.tsx  # ← MỚI: Component ghi âm
-│   ├── VoicePreview.tsx       # ← MỚI: Preview trước khi gửi
-│   ├── VoicePlayer.tsx        # ← MỚI: Phát voice trong bubble
-│   └── MessageBubble.tsx      # ← Sửa: hiển thị VoicePlayer
-├── hooks/
-│   └── useVoiceRecorder.ts    # ← MỚI: Hook quản lý ghi âm
-├── types.ts                   # ← Sửa: thêm media_type 'voice'
-└── index.ts                   # ← Sửa: export components mới
+src/pages/Chat.tsx
+├── Trước: Import từ src/components/chat/ và src/hooks/
+└── Sau: Import từ packages/chat/ và wrap với ChatProvider
 ```
 
 ---
 
-## Chi tiết Implementation
+## Chi tiết thay đổi
 
-### 1. Hook: useVoiceRecorder.ts (MỚI)
+### 1. Import từ packages/chat/ thay vì src/components/chat/
 
-Hook quản lý toàn bộ logic ghi âm sử dụng Web Audio API.
+**Trước:**
+```typescript
+import { useConversations } from '@/hooks/useConversations';
+import { useGroupConversations } from '@/hooks/useGroupConversations';
+import { useChatNotifications } from '@/hooks/useChatNotifications';
+import { ConversationList } from '@/components/chat/ConversationList';
+import { MessageThread } from '@/components/chat/MessageThread';
+import { NewConversationDialog } from '@/components/chat/NewConversationDialog';
+import { CreateGroupDialog } from '@/components/chat/CreateGroupDialog';
+import { ChatSettingsDialog } from '@/components/chat/ChatSettingsDialog';
+```
+
+**Sau:**
+```typescript
+// Import từ package chat
+import {
+  ChatProvider,
+  ConversationList,
+  MessageThread,
+  NewConversationDialog,
+  CreateGroupDialog,
+  ChatSettingsDialog,
+  useConversations,
+  useGroupConversations,
+  useChatNotifications,
+} from '../../packages/chat/src';
+```
+
+### 2. Wrap nội dung với ChatProvider
+
+Package chat yêu cầu `ChatProvider` để inject các dependencies:
 
 ```typescript
-// packages/chat/src/hooks/useVoiceRecorder.ts
+// Config cho ChatProvider
+const chatConfig = {
+  supabase: supabase,
+  queryClient: queryClient,
+  currentUserId: userId,
+  currentUsername: username,
+  uploadMedia: uploadChatMedia, // Hàm upload media
+  dateLocale: vi, // Locale tiếng Việt
+};
 
-interface VoiceRecorderState {
-  isRecording: boolean;
-  duration: number;
-  audioBlob: Blob | null;
-  audioUrl: string | null;
-}
+return (
+  <ChatProvider config={chatConfig}>
+    {/* Nội dung chat */}
+  </ChatProvider>
+);
+```
 
-interface UseVoiceRecorderReturn {
-  state: VoiceRecorderState;
-  startRecording: () => Promise<void>;
-  stopRecording: () => void;
-  cancelRecording: () => void;
-  clearRecording: () => void;
-}
+### 3. Tạo hàm uploadMedia adapter
 
-export function useVoiceRecorder(): UseVoiceRecorderReturn {
-  // State management
-  const [isRecording, setIsRecording] = useState(false);
-  const [duration, setDuration] = useState(0);
-  const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
-  
-  // Refs for MediaRecorder
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
-  const timerRef = useRef<number>();
+Package chat cần function `uploadMedia` với signature đơn giản. Ta cần adapter từ `uploadCommentMedia`:
 
-  const startRecording = async () => {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const mediaRecorder = new MediaRecorder(stream);
-    
-    mediaRecorder.ondataavailable = (e) => {
-      chunksRef.current.push(e.data);
-    };
-    
-    mediaRecorder.onstop = () => {
-      const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
-      setAudioBlob(blob);
-      // Cleanup stream
-      stream.getTracks().forEach(track => track.stop());
-    };
-    
-    mediaRecorder.start();
-    setIsRecording(true);
-    
-    // Duration timer
-    timerRef.current = window.setInterval(() => {
-      setDuration(d => d + 1);
-    }, 1000);
+```typescript
+// Adapter để phù hợp với ChatConfig.uploadMedia
+const uploadChatMedia = async (file: File) => {
+  const result = await uploadCommentMedia(file);
+  return { 
+    url: result.url, 
+    type: file.type.startsWith('audio/') ? 'voice' : undefined 
   };
-
-  const stopRecording = () => {
-    mediaRecorderRef.current?.stop();
-    clearInterval(timerRef.current);
-    setIsRecording(false);
-  };
-
-  // ... cancelRecording, clearRecording
-}
+};
 ```
 
-### 2. Component: VoiceRecordButton.tsx (MỚI)
+### 4. Điều chỉnh cách sử dụng hooks
 
-Nút micro trong ChatInput - nhấn giữ để ghi âm.
-
+**Trước:** Hooks nhận `userId` qua parameter
 ```typescript
-// packages/chat/src/components/VoiceRecordButton.tsx
-
-interface VoiceRecordButtonProps {
-  onRecordingComplete: (blob: Blob, duration: number) => void;
-  disabled?: boolean;
-}
-
-export function VoiceRecordButton({ 
-  onRecordingComplete, 
-  disabled 
-}: VoiceRecordButtonProps) {
-  const { state, startRecording, stopRecording, cancelRecording } = useVoiceRecorder();
-  
-  return (
-    <button
-      className={cn(
-        "p-2 rounded-full transition-all",
-        state.isRecording 
-          ? "bg-red-500 text-white animate-pulse" 
-          : "hover:bg-accent"
-      )}
-      onMouseDown={startRecording}
-      onMouseUp={() => {
-        stopRecording();
-        if (state.audioBlob) {
-          onRecordingComplete(state.audioBlob, state.duration);
-        }
-      }}
-      onMouseLeave={cancelRecording} // Hủy nếu kéo chuột ra
-      disabled={disabled}
-    >
-      <Mic className="h-5 w-5" />
-      {state.isRecording && (
-        <span className="ml-1 text-xs">{formatDuration(state.duration)}</span>
-      )}
-    </button>
-  );
-}
+const { conversations, isLoading } = useConversations(userId);
+const { createGroupConversation } = useGroupConversations(userId);
+useChatNotifications(userId, conversationId);
 ```
 
-### 3. Component: VoicePreview.tsx (MỚI)
-
-Preview voice message trước khi gửi.
-
+**Sau:** Hooks lấy userId từ ChatProvider context
 ```typescript
-// packages/chat/src/components/VoicePreview.tsx
-
-interface VoicePreviewProps {
-  audioUrl: string;
-  duration: number;
-  onSend: () => void;
-  onCancel: () => void;
-  isSending: boolean;
-}
-
-export function VoicePreview({
-  audioUrl,
-  duration,
-  onSend,
-  onCancel,
-  isSending,
-}: VoicePreviewProps) {
-  const audioRef = useRef<HTMLAudioElement>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-
-  return (
-    <div className="flex items-center gap-3 p-3 bg-muted rounded-lg">
-      {/* Play/Pause button */}
-      <button onClick={togglePlay} className="p-2 rounded-full bg-primary text-white">
-        {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-      </button>
-      
-      {/* Waveform visualization (simplified) */}
-      <div className="flex-1 h-8 bg-background rounded flex items-center px-2">
-        <div className="w-full h-1 bg-primary/30 rounded relative">
-          <div 
-            className="absolute h-full bg-primary rounded" 
-            style={{ width: `${progress}%` }}
-          />
-        </div>
-      </div>
-      
-      {/* Duration */}
-      <span className="text-sm text-muted-foreground">{formatDuration(duration)}</span>
-      
-      {/* Actions */}
-      <button onClick={onCancel} className="p-2 hover:bg-background rounded-full">
-        <Trash2 className="h-4 w-4 text-destructive" />
-      </button>
-      <button 
-        onClick={onSend} 
-        disabled={isSending}
-        className="p-2 bg-primary text-white rounded-full"
-      >
-        <Send className="h-4 w-4" />
-      </button>
-      
-      <audio ref={audioRef} src={audioUrl} />
-    </div>
-  );
-}
+const { conversations, isLoading, createDirectConversation } = useConversations();
+const { createGroupConversation } = useGroupConversations();
+useChatNotifications(conversationId);
 ```
 
-### 4. Component: VoicePlayer.tsx (MỚI)
+### 5. Component MessageThread đơn giản hơn
 
-Phát voice message trong MessageBubble.
-
-```typescript
-// packages/chat/src/components/VoicePlayer.tsx
-
-interface VoicePlayerProps {
-  url: string;
-  duration?: number;
-  isOwn: boolean;
-}
-
-export function VoicePlayer({ url, duration, isOwn }: VoicePlayerProps) {
-  const audioRef = useRef<HTMLAudioElement>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
-
-  return (
-    <div className={cn(
-      "flex items-center gap-2 min-w-[200px]",
-      isOwn ? "text-primary-foreground" : ""
-    )}>
-      <button 
-        onClick={togglePlay}
-        className="p-2 rounded-full bg-background/20"
-      >
-        {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-      </button>
-      
-      {/* Progress bar */}
-      <div className="flex-1 h-1 bg-background/30 rounded">
-        <div 
-          className="h-full bg-current rounded transition-all" 
-          style={{ width: `${progress}%` }}
-        />
-      </div>
-      
-      {/* Time */}
-      <span className="text-xs opacity-70">
-        {formatDuration(isPlaying ? currentTime : (duration || 0))}
-      </span>
-      
-      <audio ref={audioRef} src={url} />
-    </div>
-  );
-}
+**Trước:** Truyền userId, username qua props
+```tsx
+<MessageThread
+  conversationId={conversationId}
+  userId={userId}
+  username={username}
+/>
 ```
 
-### 5. Cập nhật ChatInput.tsx
-
-Thêm VoiceRecordButton và VoicePreview.
-
-```typescript
-// Thay đổi trong ChatInput.tsx
-
-import { VoiceRecordButton } from './VoiceRecordButton';
-import { VoicePreview } from './VoicePreview';
-
-export function ChatInput({ ... }) {
-  // Thêm state cho voice
-  const [voiceBlob, setVoiceBlob] = useState<Blob | null>(null);
-  const [voiceDuration, setVoiceDuration] = useState(0);
-  const [voicePreviewUrl, setVoicePreviewUrl] = useState<string | null>(null);
-
-  const handleVoiceRecorded = (blob: Blob, duration: number) => {
-    setVoiceBlob(blob);
-    setVoiceDuration(duration);
-    setVoicePreviewUrl(URL.createObjectURL(blob));
-  };
-
-  const handleSendVoice = async () => {
-    if (!voiceBlob || !uploadMedia) return;
-    
-    // Convert blob to File và upload
-    const file = new File([voiceBlob], 'voice.webm', { type: 'audio/webm' });
-    const { url } = await uploadMedia(file);
-    
-    await onSend('', [url]); // Gửi như media với type 'voice'
-    clearVoice();
-  };
-
-  return (
-    <div className={cn("border-t bg-card p-3", className)}>
-      {/* Voice Preview (khi đã ghi âm xong) */}
-      {voicePreviewUrl && (
-        <VoicePreview
-          audioUrl={voicePreviewUrl}
-          duration={voiceDuration}
-          onSend={handleSendVoice}
-          onCancel={clearVoice}
-          isSending={isSending}
-        />
-      )}
-
-      {/* Normal input area (ẩn khi có voice preview) */}
-      {!voicePreviewUrl && (
-        <div className="flex items-end gap-2">
-          {/* ... existing buttons ... */}
-          
-          {/* NEW: Voice Record Button */}
-          <VoiceRecordButton
-            onRecordingComplete={handleVoiceRecorded}
-            disabled={isDisabled || mediaFiles.length > 0}
-          />
-          
-          {/* ... textarea và send button ... */}
-        </div>
-      )}
-    </div>
-  );
-}
+**Sau:** Không cần truyền userId/username (lấy từ context)
+```tsx
+<MessageThread
+  conversationId={conversationId}
+  onSearchClick={() => setShowSearch(true)}
+  onSettingsClick={() => setShowGroupSettings(true)}
+/>
 ```
 
-### 6. Cập nhật MessageBubble.tsx
+### 6. Điều chỉnh ChatSettingsDialog
 
-Hiển thị VoicePlayer cho voice messages.
-
-```typescript
-// Thêm vào MessageBubble.tsx
-
-import { VoicePlayer } from './VoicePlayer';
-
-// Trong phần render media:
-{message.media_type === 'voice' && message.media_url && (
-  <VoicePlayer 
-    url={message.media_url} 
-    isOwn={isOwn}
-  />
-)}
-
-// Với image/video thì giữ nguyên logic cũ
-{message.media_type !== 'voice' && mediaUrls.length > 0 && (
-  // ... existing image rendering
-)}
+**Trước:** Nhận `userId` qua props
+```tsx
+<ChatSettingsDialog
+  open={showSettings}
+  onOpenChange={setShowSettings}
+  userId={userId}
+/>
 ```
 
-### 7. Cập nhật types.ts
-
-Mở rộng media_type để bao gồm 'voice'.
-
-```typescript
-// Trong Message interface
-export interface Message {
-  // ... existing fields
-  media_type: 'image' | 'video' | 'voice' | null;
-  voice_duration?: number; // Optional: thời lượng voice
-}
-```
-
-### 8. Cập nhật index.ts (exports)
-
-```typescript
-// Thêm exports mới
-export { VoiceRecordButton } from './components/VoiceRecordButton';
-export { VoicePreview } from './components/VoicePreview';
-export { VoicePlayer } from './components/VoicePlayer';
-export { useVoiceRecorder } from './hooks/useVoiceRecorder';
+**Sau:** Không cần truyền userId (lấy từ context)
+```tsx
+<ChatSettingsDialog
+  open={showSettings}
+  onOpenChange={setShowSettings}
+/>
 ```
 
 ---
 
-## Files được tạo/sửa (CHỈ trong packages/chat/)
+## File cần sửa
 
 | File | Hành động | Mô tả |
 |------|-----------|-------|
-| `packages/chat/src/hooks/useVoiceRecorder.ts` | Tạo mới | Hook ghi âm |
-| `packages/chat/src/components/VoiceRecordButton.tsx` | Tạo mới | Nút ghi âm |
-| `packages/chat/src/components/VoicePreview.tsx` | Tạo mới | Preview voice |
-| `packages/chat/src/components/VoicePlayer.tsx` | Tạo mới | Phát voice |
-| `packages/chat/src/components/ChatInput.tsx` | Sửa | Tích hợp voice |
-| `packages/chat/src/components/MessageBubble.tsx` | Sửa | Hiển thị voice |
-| `packages/chat/src/types.ts` | Sửa | Thêm voice type |
-| `packages/chat/src/index.ts` | Sửa | Export mới |
+| `src/pages/Chat.tsx` | Sửa | Tích hợp ChatProvider và import từ package |
 
 ---
 
-## Minh họa Workflow Team Chat
+## Cấu trúc code mới (src/pages/Chat.tsx)
 
-Demo này thể hiện rõ:
+```typescript
+import { useState, useEffect, useMemo } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
+import { vi } from 'date-fns/locale';
+import { supabase } from '@/integrations/supabase/client';
+import { uploadCommentMedia } from '@/utils/mediaUpload';
+import { FacebookNavbar } from '@/components/layout/FacebookNavbar';
+import { MobileBottomNav } from '@/components/layout/MobileBottomNav';
+import { useIsMobile, useIsMobileOrTablet } from '@/hooks/use-mobile';
+// ... UI components
 
-1. **Phạm vi làm việc rõ ràng**: Tất cả thay đổi chỉ trong `packages/chat/src/`
-2. **Không ảnh hưởng code khác**: Không chạm vào `src/`, `packages/core/`, hay bất kỳ module nào khác
-3. **Self-contained**: Voice feature hoàn toàn nằm trong chat module
-4. **Dependency Injection**: Upload function được inject từ host app qua `ChatProvider`
+// Import từ package chat SDK
+import {
+  ChatProvider,
+  ConversationList,
+  MessageThread,
+  NewConversationDialog,
+  CreateGroupDialog,
+  ChatSettingsDialog,
+  useConversations,
+  useGroupConversations,
+  useChatNotifications,
+} from '../../packages/chat/src';
 
----
+export default function Chat() {
+  // ... state
 
-## Luồng hoạt động
+  // Upload adapter cho package chat
+  const uploadChatMedia = async (file: File) => {
+    const result = await uploadCommentMedia(file);
+    return { url: result.url, type: file.type.startsWith('audio/') ? 'voice' : undefined };
+  };
 
-```text
-┌─────────────────────────────────────────────────────────────┐
-│                      ChatInput                               │
-│  ┌─────────┐  ┌─────────┐  ┌──────────────┐  ┌───────────┐ │
-│  │ 📷 Image│  │ 😀 Emoji│  │ 🎤 Voice Btn │  │  Textarea │ │
-│  └─────────┘  └─────────┘  └──────────────┘  └───────────┘ │
-│                                    │                         │
-│                          Nhấn giữ để ghi âm                  │
-│                                    ▼                         │
-│  ┌─────────────────────────────────────────────────────────┐│
-│  │              VoicePreview (sau khi ghi xong)            ││
-│  │   ▶️ ═══════════════════════ 0:15   🗑️  📤           ││
-│  └─────────────────────────────────────────────────────────┘│
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼ Gửi
-┌─────────────────────────────────────────────────────────────┐
-│                    MessageBubble (voice)                     │
-│  ┌─────────────────────────────────────────────────────────┐│
-│  │   ▶️ ════════════════════  0:15                        ││
-│  │                                      VoicePlayer        ││
-│  └─────────────────────────────────────────────────────────┘│
-│                                                 10:30 ✓✓    │
-└─────────────────────────────────────────────────────────────┘
+  // Chat config
+  const queryClient = useQueryClient();
+  const chatConfig = useMemo(() => ({
+    supabase,
+    queryClient,
+    currentUserId: userId,
+    currentUsername: username,
+    uploadMedia: uploadChatMedia,
+    dateLocale: vi,
+  }), [userId, username, queryClient]);
+
+  return (
+    <ChatProvider config={chatConfig}>
+      <ChatContent />
+    </ChatProvider>
+  );
+}
+
+// Tách thành component riêng để sử dụng hooks từ ChatProvider
+function ChatContent() {
+  const { conversations, isLoading, createDirectConversation } = useConversations();
+  const { createGroupConversation } = useGroupConversations();
+  
+  useChatNotifications(conversationId);
+
+  // ... render logic (giữ nguyên structure)
+}
 ```
+
+---
+
+## Lưu ý quan trọng
+
+1. **ChatProvider phải wrap component dùng hooks**: Các hooks như `useConversations()` cần được gọi bên trong `ChatProvider`, nên ta cần tách `ChatContent` thành component riêng.
+
+2. **Voice Message sẽ tự động hoạt động**: Vì `packages/chat/src/components/ChatInput.tsx` đã có `VoiceRecordButton` và `VoicePreview`, chỉ cần tích hợp package là nút ghi âm sẽ xuất hiện.
+
+3. **Import path**: Do package chưa publish lên npm, ta dùng relative import `../../packages/chat/src`.
+
+---
+
+## Kết quả sau khi tích hợp
+
+- Nút **🎤 ghi âm** xuất hiện trong ChatInput
+- Có thể **nhấn giữ** để ghi âm voice message
+- **Voice Preview** cho phép nghe lại trước khi gửi
+- **VoicePlayer** hiển thị trong tin nhắn đã gửi
+- Code duy trì tập trung tại `packages/chat/`
+
