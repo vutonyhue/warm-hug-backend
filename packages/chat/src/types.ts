@@ -93,13 +93,16 @@ export interface Message {
   conversation_id: string;
   sender_id: string | null;
   content: string | null;
-  media_type: string | null;
+  /** Media type: 'image' | 'video' | 'voice' | null */
+  media_type: 'image' | 'video' | 'voice' | string | null;
   media_url: string | null;
   reply_to_id: string | null;
   is_deleted: boolean | null;
   is_edited: boolean | null;
   created_at: string | null;
   updated_at: string | null;
+  /** Duration in seconds for voice messages */
+  voice_duration?: number;
   sender?: UserProfile;
   reply_to?: Message | null;
   reactions?: MessageReaction[];

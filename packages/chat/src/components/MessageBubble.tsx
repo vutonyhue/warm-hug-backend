@@ -4,6 +4,7 @@ import { vi } from 'date-fns/locale';
 import { Reply, SmilePlus, Check, CheckCheck } from 'lucide-react';
 import { cn } from '../utils/cn';
 import { useChatUser } from './ChatProvider';
+import { VoicePlayer } from './VoicePlayer';
 import type { Message } from '../types';
 
 const REACTION_EMOJIS = ['❤️', '😂', '😮', '😢', '😡', '👍'];
@@ -19,7 +20,7 @@ interface MessageBubbleProps {
 }
 
 /**
- * Individual message bubble with reactions and read receipts
+ * Individual message bubble with reactions, read receipts, and voice message support
  */
 export const MessageBubble = memo(function MessageBubble({
   message,
@@ -33,6 +34,7 @@ export const MessageBubble = memo(function MessageBubble({
   const [showActions, setShowActions] = useState(false);
   const [showReactionPicker, setShowReactionPicker] = useState(false);
 
+  const isVoiceMessage = message.media_type === 'voice';
   const mediaUrls = message.media_url ? [message.media_url] : [];
   
   // Group reactions by emoji
@@ -105,8 +107,17 @@ export const MessageBubble = memo(function MessageBubble({
             <p className="whitespace-pre-wrap break-words">{message.content}</p>
           )}
 
-          {/* Media */}
-          {mediaUrls.length > 0 && (
+          {/* Voice message player */}
+          {isVoiceMessage && message.media_url && (
+            <VoicePlayer
+              url={message.media_url}
+              duration={message.voice_duration}
+              isOwn={isOwn}
+            />
+          )}
+
+          {/* Regular media (images/videos) - only show if not voice */}
+          {!isVoiceMessage && mediaUrls.length > 0 && (
             <div className={cn('mt-2 grid gap-1', mediaUrls.length > 1 ? 'grid-cols-2' : '')}>
               {mediaUrls.map((url, i) => (
                 <img
@@ -176,7 +187,7 @@ export const MessageBubble = memo(function MessageBubble({
           </button>
           
           {showReactionPicker && (
-            <div className="absolute bottom-full right-0 mb-1 p-2 bg-card border rounded-lg shadow-lg flex gap-1">
+            <div className="absolute bottom-full right-0 mb-1 p-2 bg-card border rounded-lg shadow-lg flex gap-1 z-10">
               {REACTION_EMOJIS.map((emoji) => (
                 <button
                   key={emoji}
