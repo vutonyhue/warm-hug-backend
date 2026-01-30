@@ -16,11 +16,26 @@ export const MEDIA_PATHS = {
 } as const;
 
 /**
+ * Check if a URL is a Cloudflare Stream video URL
+ * Stream videos use videodelivery.net or cloudflarestream.com domains
+ */
+export function isCloudflareStreamUrl(url: string | null | undefined): boolean {
+  if (!url) return false;
+  return url.includes('videodelivery.net') || url.includes('cloudflarestream.com');
+}
+
+/**
  * Build full URL từ media key
  * Backward compatible: nếu đã là full URL, trả về nguyên vẹn
+ * Stream URLs: trả về nguyên vẹn (không transform)
  */
 export function getMediaUrl(key: string | null | undefined): string {
   if (!key) return '/placeholder.svg';
+  
+  // Nếu là Cloudflare Stream URL, trả về nguyên vẹn (không transform qua R2)
+  if (isCloudflareStreamUrl(key)) {
+    return key;
+  }
   
   // Nếu đã là full URL, trả về nguyên vẹn (backward compatible với bài viết cũ)
   if (key.startsWith('http://') || key.startsWith('https://')) {

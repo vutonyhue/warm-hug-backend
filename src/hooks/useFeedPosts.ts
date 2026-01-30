@@ -107,15 +107,17 @@ const fetchFeedPage = async (cursor: string | null): Promise<FeedPage> => {
   }
 
   // Transform API response to match existing FeedPage structure
-  // Build full URLs từ keys cho media
+  // NOTE: Không transform URLs ở đây - để MediaGrid/FacebookPostCard xử lý
+  // vì cần phân biệt Stream videos vs R2 media
   const posts: FeedPost[] = (apiResponse.data || []).map((post) => ({
     id: post.id,
     content: post.content || '',
-    image_url: post.image_url ? getMediaUrl(post.image_url) : null,
-    video_url: post.video_url ? getMediaUrl(post.video_url) : null,
+    // Giữ nguyên key/URL từ API - component sẽ build URL sau
+    image_url: post.image_url || null,
+    video_url: post.video_url || null,
     media_urls: post.media_urls 
       ? (post.media_urls as Array<{ url: string; type: 'image' | 'video' }>).map((m) => ({
-          url: getMediaUrl(m.url),
+          url: m.url, // Giữ nguyên - MediaGrid sẽ xử lý
           type: m.type,
         })) 
       : null,

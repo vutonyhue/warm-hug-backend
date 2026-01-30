@@ -402,13 +402,14 @@ export const FacebookCreatePost = ({ onPostCreated }: FacebookCreatePostProps) =
       
       // Add Uppy-uploaded video first if exists
       if (uppyVideoResult) {
-        // Extract key from Uppy video URL hoặc giữ nguyên URL
-        const videoKey = uppyVideoResult.url.replace(/^https?:\/\/[^/]+\//, '');
+        // Stream videos: lưu FULL URL (không extract key)
+        // vì Cloudflare Stream dùng domain riêng (videodelivery.net)
+        // và không thể serve qua R2 custom domain
         mediaUrls.push({
-          url: videoKey, // Lưu key thay vì full URL
+          url: uppyVideoResult.url, // Giữ nguyên: https://iframe.videodelivery.net/{uid}
           type: 'video',
         });
-        console.log('[CreatePost] Added video key:', videoKey);
+        console.log('[CreatePost] Added Stream video URL:', uppyVideoResult.url);
       }
       
       for (const item of mediaItems) {
