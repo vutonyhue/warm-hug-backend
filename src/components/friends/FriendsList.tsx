@@ -166,10 +166,14 @@ export const FriendsList = ({ userId }: FriendsListProps) => {
   };
 
   const fetchSuggestions = async () => {
-    const { data: existingRelations } = await supabase
+    const { data: existingRelations, error: relError } = await supabase
       .from("friendships")
       .select("requester_id, addressee_id")
       .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`);
+
+    if (relError) {
+      console.error('[FriendsList] Error fetching relations:', relError);
+    }
 
     const excludedUserIds = new Set([userId]);
     existingRelations?.forEach(rel => {
@@ -177,20 +181,30 @@ export const FriendsList = ({ userId }: FriendsListProps) => {
       excludedUserIds.add(rel.addressee_id);
     });
 
-    const { data: profilesData } = await supabase
-      .from("profiles")
+    // Use public_profiles and filter client-side to avoid SQL formatting issues
+    const { data: profilesData, error } = await supabase
+      .from("public_profiles")
       .select("id, username, full_name, avatar_url")
-      .not("id", "in", `(${Array.from(excludedUserIds).join(',')})`)
-      .limit(10);
+      .limit(20);
 
-    const suggestionsList: Friend[] = (profilesData || []).map(profile => ({
-      id: profile.id,
-      username: profile.username,
-      full_name: profile.full_name || "",
-      avatar_url: profile.avatar_url || "",
-      friendship_id: ""
-    }));
+    if (error) {
+      console.error('[FriendsList] Error fetching suggestions:', error);
+      setSuggestions([]);
+      return;
+    }
 
+    // Filter client-side
+    const suggestionsList: Friend[] = (profilesData || [])
+      .filter(profile => profile.id && !excludedUserIds.has(profile.id))
+      .map(profile => ({
+        id: profile.id!,
+        username: profile.username || 'Unknown',
+        full_name: profile.full_name || "",
+        avatar_url: profile.avatar_url || "",
+        friendship_id: ""
+      }));
+
+    console.log('[FriendsList] Suggestions:', suggestionsList.length);
     setSuggestions(suggestionsList);
   };
 
@@ -355,7 +369,7 @@ export const FriendsList = ({ userId }: FriendsListProps) => {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => navigate(`/profile/${friend.id}`)}>
+                          <DropdownMenuItem onClick={() => navigate(`/chat?user=${friend.id}`)}>
                             <MessageCircle className="w-4 h-4 mr-2" />
                             Nhắn tin
                           </DropdownMenuItem>
