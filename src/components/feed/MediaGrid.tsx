@@ -27,18 +27,27 @@ export const MediaGrid = memo(({ media: initialMedia }: MediaGridProps) => {
   const [brokenUrls, setBrokenUrls] = useState<Set<string>>(new Set());
 
   // Filter out broken media and build full URLs from keys
-  const media = useMemo(() => 
-    initialMedia
+  const media = useMemo(() => {
+    console.log('[MediaGrid] initialMedia:', initialMedia);
+    
+    const result = initialMedia
       .filter(item => !brokenUrls.has(item.url))
-      .map(item => ({
-        ...item,
-        // Build full URL từ key (hoặc giữ nguyên nếu đã là full URL)
-        url: getMediaUrl(item.url),
-      })),
-    [initialMedia, brokenUrls]
-  );
+      .map(item => {
+        const builtUrl = getMediaUrl(item.url);
+        console.log('[MediaGrid] item.url:', item.url, '→ builtUrl:', builtUrl);
+        return {
+          ...item,
+          // Build full URL từ key (hoặc giữ nguyên nếu đã là full URL)
+          url: builtUrl,
+        };
+      });
+    
+    console.log('[MediaGrid] final media:', result);
+    return result;
+  }, [initialMedia, brokenUrls]);
 
   const handleMediaError = useCallback((url: string) => {
+    console.error('[MediaGrid] Failed to load media:', url);
     setBrokenUrls(prev => new Set(prev).add(url));
   }, []);
 
@@ -83,7 +92,7 @@ export const MediaGrid = memo(({ media: initialMedia }: MediaGridProps) => {
               className="w-full max-h-[600px] bg-black"
               hideOnError
               onLoadError={() => handleMediaError(item.url)}
-              transformPreset="post"
+              skipTransform={true}
             />
           </div>
         )}
@@ -125,7 +134,7 @@ export const MediaGrid = memo(({ media: initialMedia }: MediaGridProps) => {
                     className="w-full h-full hover:opacity-95 transition-opacity"
                     hideOnError
                     onLoadError={() => handleMediaError(item.url)}
-                    transformPreset="post-grid"
+                    skipTransform={true}
                   />
                 </div>
               )}
@@ -170,7 +179,7 @@ export const MediaGrid = memo(({ media: initialMedia }: MediaGridProps) => {
                   className="w-full h-full hover:opacity-95"
                   hideOnError
                   onLoadError={() => handleMediaError(media[0].url)}
-                  transformPreset="post-grid"
+                  skipTransform={true}
                 />
               </div>
             )}
@@ -195,7 +204,7 @@ export const MediaGrid = memo(({ media: initialMedia }: MediaGridProps) => {
                   className="w-full h-full hover:opacity-95"
                   hideOnError
                   onLoadError={() => handleMediaError(media[1].url)}
-                  transformPreset="post-grid"
+                  skipTransform={true}
                 />
               </div>
             )}
@@ -220,7 +229,7 @@ export const MediaGrid = memo(({ media: initialMedia }: MediaGridProps) => {
                   className="w-full h-full hover:opacity-95"
                   hideOnError
                   onLoadError={() => handleMediaError(media[2].url)}
-                  transformPreset="post-grid"
+                  skipTransform={true}
                 />
               </div>
             )}
@@ -266,7 +275,7 @@ export const MediaGrid = memo(({ media: initialMedia }: MediaGridProps) => {
                   className="w-full h-full hover:opacity-95"
                   hideOnError
                   onLoadError={() => handleMediaError(item.url)}
-                  transformPreset="post-grid"
+                  skipTransform={true}
                 />
               </div>
             )}

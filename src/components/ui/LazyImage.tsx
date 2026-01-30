@@ -56,7 +56,14 @@ export const LazyImage = memo(({
   const optimizedSrc = useMemo(() => {
     if (skipTransform || !src) return src;
     
-    // Build transform options from preset and custom options
+    // TEMPORARILY: Skip Image Resizing for full R2 URLs to debug 404 issues
+    // If src is already a full URL (http/https), return as-is
+    // This avoids /cdn-cgi/image/ 404 errors when domain doesn't match R2 origin
+    if (src.startsWith('http://') || src.startsWith('https://')) {
+      return src;
+    }
+    
+    // Only transform if it's a relative path/key
     const options: ImageTransformOptions = {
       ...(transformPreset ? { preset: transformPreset } : {}),
       ...transformOptions,
