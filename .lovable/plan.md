@@ -1,131 +1,153 @@
 
-# Kế hoạch: Sửa lỗi trang Law of Light bị kẹt "Đang xử lý..."
+# Kế hoạch: Sửa lỗi "You don't have permission to view this video"
 
-## Nguyên nhân
+## Nguyên nhân gốc
 
-Sau khi phân tích code và network logs, tôi đã xác định được nguyên nhân:
+Sau khi phân tích code và logs, tôi đã xác định **3 vấn đề chính**:
 
-### Vấn đề 1: Race condition giữa useEffect và handleAccept
-
-Khi user đã đăng nhập và đã chấp nhận Law of Light:
-1. Trang `/law-of-light` load và render UI ngay lập tức
-2. `useEffect` chạy async `checkAuth()` để kiểm tra trạng thái
-3. Trong khi đợi response từ database, **user có thể click nút** (vì UI đã hiển thị đầy đủ)
-4. Nếu user click → `setLoading(true)` → nút hiển thị "Đang xử lý..."
-5. `checkAuth()` hoàn thành → thấy đã accepted → gọi `navigate('/')`
-6. Trang navigate đi nhưng có thể xảy ra xung đột state
-
-### Vấn đề 2: Không có loading state khi kiểm tra auth
-
-Trang render ngay checkboxes và nút submit mà không đợi kết quả kiểm tra auth. Điều này cho phép user tương tác trước khi biết trạng thái thực sự.
-
-### Vấn đề 3: Không handle error từ update profile
-
+### 1. Race Condition trong Video Settings Update
+Trong file `src/components/feed/VideoUploaderUppy.tsx` (dòng 573-585), việc update video settings được gọi như sau:
 ```typescript
-await supabase.from('profiles').update({...}).eq('id', session.user.id);
-// Không destructure error → không biết có lỗi hay không
+try {
+  await supabase.functions.invoke('stream-video', {
+    body: {
+      action: 'update-video-settings',
+      uid,
+      requireSignedURLs: false,
+      allowedOrigins: ['*'],
+    },
+  });
+  console.log('[VideoUploader] Video settings updated');
+} catch (err) {
+  console.warn('[VideoUploader] Failed to update settings:', err);
+}
 ```
+Vấn đề: Dù có `await`, nhưng nếu call bị fail, hàm `onUploadComplete()` vẫn được gọi ngay sau đó và post được tạo với video không có quyền public.
+
+### 2. Video chưa Ready khi hiển thị
+Cloudflare Stream cần thời gian để encode và processing video. Khi post được tạo ngay lập tức sau upload, video có thể chưa `readyToStream`.
+
+### 3. Không chờ đợi Settings Update hoàn thành
+Trong `streamUpload.ts` (dòng 176-187 và 283-293), việc update settings được gọi qua `.catch()`:
+```typescript
+supabase.functions.invoke('stream-video', {
+  body: { 
+    action: 'update-video-settings',
+    uid,
+    requireSignedURLs: false,
+    allowedOrigins: ['*'],
+  }
+}).catch((err) => {
+  console.warn('[streamUpload] Failed to update video settings:', err);
+});
+```
+Điều này có nghĩa là code **không chờ đợi** kết quả và tiếp tục ngay lập tức.
 
 ---
 
-## Giải pháp
+## Giải pháp đề xuất
 
-### A) Thêm loading state khi kiểm tra auth (ưu tiên)
-
-Thêm state `isCheckingAuth` để ngăn user tương tác khi đang kiểm tra:
+### A) Sửa Video Settings Update trong VideoUploaderUppy.tsx (ưu tiên cao)
+- **Đảm bảo await thành công** trước khi call `onUploadComplete()`
+- Nếu update settings thất bại, thử lại tối đa 3 lần
+- Chỉ hoàn thành upload khi settings đã được cập nhật
 
 ```typescript
-const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+// Trong onSuccess callback (dòng 572-610)
+onSuccess: async () => {
+  console.log('[VideoUploader] Upload complete! UID:', uid);
 
-useEffect(() => {
-  const checkAuth = async () => {
-    setIsCheckingAuth(true);
+  // Update video settings với retry logic
+  let settingsUpdated = false;
+  for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('law_of_light_accepted')
-          .eq('id', session.user.id)
-          .single();
-        
-        if (profile?.law_of_light_accepted) {
-          navigate('/');
-          return; // Early return - không cần set isCheckingAuth
-        }
+      const { error } = await supabase.functions.invoke('stream-video', {
+        body: {
+          action: 'update-video-settings',
+          uid,
+          requireSignedURLs: false,
+          allowedOrigins: ['*'],
+        },
+      });
+      
+      if (!error) {
+        console.log('[VideoUploader] Video settings updated successfully');
+        settingsUpdated = true;
+        break;
       }
-    } catch (error) {
-      console.error('Error checking auth:', error);
-    } finally {
-      setIsCheckingAuth(false);
+      console.warn(`[VideoUploader] Settings update attempt ${attempt} failed:`, error);
+    } catch (err) {
+      console.warn(`[VideoUploader] Settings update attempt ${attempt} error:`, err);
+    }
+    
+    // Wait before retry
+    if (attempt < 3) {
+      await new Promise(r => setTimeout(r, 1000));
+    }
+  }
+  
+  if (!settingsUpdated) {
+    console.error('[VideoUploader] Failed to update video settings after 3 attempts');
+    toast.warning('Video đã tải lên nhưng có thể cần thời gian để hiển thị');
+  }
+
+  // Continue with success flow...
+}
+```
+
+### B) Cải thiện StreamPlayer để xử lý video chưa ready
+Trong `src/components/ui/StreamPlayer.tsx`:
+- Thêm logic kiểm tra video status trước khi render iframe
+- Nếu video chưa ready, hiển thị thông báo "Đang xử lý video"
+- Tự động retry sau mỗi vài giây
+
+```typescript
+// Thêm useEffect để check video status
+useEffect(() => {
+  if (!uid) return;
+  
+  const checkVideoReady = async () => {
+    try {
+      const { data } = await supabase.functions.invoke('stream-video', {
+        body: { action: 'check-status', uid }
+      });
+      
+      if (data?.readyToStream) {
+        setIsProcessing(false);
+        setHasError(false);
+      } else {
+        setIsProcessing(true);
+        // Retry after 5 seconds
+        setTimeout(checkVideoReady, 5000);
+      }
+    } catch (err) {
+      console.error('[StreamPlayer] Status check error:', err);
     }
   };
-  checkAuth();
-}, [location, navigate]);
-```
-
-Sau đó disable button khi đang check:
-
-```typescript
-<Button
-  onClick={handleAccept}
-  disabled={!allChecked || loading || isCheckingAuth}
-  ...
->
-```
-
-### B) Cải thiện error handling trong handleAccept
-
-```typescript
-const handleAccept = async () => {
-  if (!allChecked) return;
-  setLoading(true);
   
-  try {
-    const { data: { session } } = await supabase.auth.getSession();
-    
-    if (session) {
-      const { error } = await supabase.from('profiles').update({
-        law_of_light_accepted: true,
-        law_of_light_accepted_at: new Date().toISOString()
-      }).eq('id', session.user.id);
-      
-      if (error) {
-        console.error('Error updating profile:', error);
-        toast.error('Có lỗi xảy ra, vui lòng thử lại');
-        return; // Exit early nếu có lỗi
-      }
-      
-      toast.success('🌟 Con đã sẵn sàng bước vào Ánh Sáng!');
-      navigate('/');
-    } else {
-      localStorage.setItem('law_of_light_accepted_pending', 'true');
-      toast.success('🌟 Con đã sẵn sàng bước vào Ánh Sáng!');
-      navigate('/auth');
-    }
-  } catch (error) {
-    console.error('Error accepting law of light:', error);
-    toast.error('Có lỗi xảy ra, vui lòng thử lại');
-  } finally {
-    setLoading(false);
-  }
-};
+  checkVideoReady();
+}, [uid]);
 ```
 
-### C) Hiển thị loading screen trong khi kiểm tra auth
-
-Thay vì render UI đầy đủ ngay lập tức, hiển thị loading spinner cho đến khi biết trạng thái user:
+### C) Sửa streamUpload.ts để đợi settings update
+Trong `src/utils/streamUpload.ts` (dòng 176-187 và 283-293):
+- Thay đổi từ fire-and-forget thành await với error handling
 
 ```typescript
-if (isCheckingAuth) {
-  return (
-    <div className="min-h-screen flex items-center justify-center">
-      <div className="flex flex-col items-center gap-4">
-        <div className="w-10 h-10 border-4 border-yellow-500 border-t-transparent rounded-full animate-spin" />
-        <p className="text-yellow-700">Đang kiểm tra...</p>
-      </div>
-    </div>
-  );
+// Thay thế code hiện tại
+try {
+  await supabase.functions.invoke('stream-video', {
+    body: { 
+      action: 'update-video-settings',
+      uid,
+      requireSignedURLs: false,
+      allowedOrigins: ['*'],
+    }
+  });
+  console.log('[streamUpload] Video settings updated');
+} catch (err) {
+  console.warn('[streamUpload] Failed to update video settings:', err);
+  // Non-blocking - video should still work, just might have permission issues
 }
 ```
 
@@ -135,18 +157,33 @@ if (isCheckingAuth) {
 
 | File | Thay đổi |
 |------|----------|
-| `src/pages/LawOfLight.tsx` | 1. Thêm state `isCheckingAuth` với giá trị mặc định `true` |
-| | 2. Update useEffect để set `isCheckingAuth` phù hợp |
-| | 3. Thêm loading screen khi `isCheckingAuth = true` |
-| | 4. Disable button khi `isCheckingAuth = true` |
-| | 5. Cải thiện error handling trong `handleAccept` |
+| `src/components/feed/VideoUploaderUppy.tsx` | 1. Thêm retry logic cho update-video-settings (3 lần) |
+| | 2. Đảm bảo await hoàn thành trước khi gọi onUploadComplete |
+| | 3. Hiển thị warning nếu settings update thất bại |
+| `src/components/ui/StreamPlayer.tsx` | 1. Thêm logic check video readyToStream |
+| | 2. Hiển thị "Đang xử lý" nếu video chưa ready |
+| | 3. Auto-retry check status mỗi 5 giây |
+| `src/utils/streamUpload.ts` | 1. Thay fire-and-forget bằng await |
+| | 2. Log warning nếu thất bại (không throw error) |
 
 ---
 
 ## Kết quả mong đợi
 
-1. Khi vào trang `/law-of-light`, user thấy loading spinner ngắn trong khi kiểm tra trạng thái
-2. Nếu đã đăng nhập + đã accepted → redirect về `/` ngay lập tức (không thấy form)
-3. Nếu chưa accepted → hiển thị form để user tick và submit
-4. Nút không bị kẹt "Đang xử lý..." vì không có race condition
-5. Có thông báo lỗi rõ ràng nếu update profile thất bại
+1. Video được upload và settings được cập nhật **trước khi** post được tạo
+2. Nếu video chưa sẵn sàng, người dùng thấy thông báo "Đang xử lý video" thay vì lỗi permission
+3. Video tự động hiển thị khi đã sẵn sàng (không cần refresh trang)
+4. Nếu settings update thất bại, người dùng được thông báo nhưng video vẫn được lưu
+
+---
+
+## Chi tiết kỹ thuật
+
+### Vì sao xảy ra lỗi "You don't have permission"?
+Cloudflare Stream mặc định có thể yêu cầu signed URLs hoặc giới hạn `allowedOrigins`. Khi upload qua Direct Creator Upload, video có thể được tạo với settings mặc định (private) và cần được update ngay sau đó.
+
+### Vì sao không thấy trong logs?
+Edge function logs cho thấy `update-video-settings` được gọi và trả về status 200. Tuy nhiên, điều này không đảm bảo Cloudflare đã apply settings ngay lập tức. Có thể có độ trễ trong hệ thống Cloudflare.
+
+### Alternative: Sử dụng signed URLs
+Nếu vấn đề vẫn tiếp diễn, có thể chuyển sang sử dụng signed URLs cho video playback. Điều này đảm bảo video luôn có thể được truy cập thông qua token được tạo bởi backend.
