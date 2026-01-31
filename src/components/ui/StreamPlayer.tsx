@@ -78,8 +78,9 @@ export const StreamPlayer = memo(({
   const [useIframeFallback, setUseIframeFallback] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [checkAttempts, setCheckAttempts] = useState(0);
-  const [ensurePublicAttempted, setEnsurePublicAttempted] = useState(false);
+  const [ensurePublicRetryCount, setEnsurePublicRetryCount] = useState(0);
   const [iframeKey, setIframeKey] = useState(0);
+  const MAX_ENSURE_PUBLIC_RETRIES = 2;
   const statusCheckRef = useRef<NodeJS.Timeout | null>(null);
 
   const { type, url, uid } = parseVideoSource(src);
@@ -88,11 +89,18 @@ export const StreamPlayer = memo(({
   const thumbnailUrl = uid ? `https://videodelivery.net/${uid}/thumbnails/thumbnail.jpg?time=1s` : poster;
 
   // Try to ensure video is public (self-healing for permission errors)
-  const tryEnsurePublic = useCallback(async () => {
-    if (!uid || ensurePublicAttempted) return;
+  // Supports retry up to MAX_ENSURE_PUBLIC_RETRIES times
+  const tryEnsurePublic = useCallback(async (): Promise<boolean> => {
+    if (!uid) return false;
     
-    console.log('[StreamPlayer] Attempting to ensure video is public:', uid);
-    setEnsurePublicAttempted(true);
+    // Check if we've exceeded retry limit
+    if (ensurePublicRetryCount >= MAX_ENSURE_PUBLIC_RETRIES) {
+      console.log('[StreamPlayer] Max ensure-public retries reached:', ensurePublicRetryCount);
+      return false;
+    }
+    
+    console.log('[StreamPlayer] Attempting to ensure video is public:', uid, 'attempt:', ensurePublicRetryCount + 1);
+    setEnsurePublicRetryCount(prev => prev + 1);
     
     try {
       const { data, error } = await supabase.functions.invoke('stream-video', {
@@ -105,9 +113,9 @@ export const StreamPlayer = memo(({
       }
       
       if (data?.success) {
-        console.log('[StreamPlayer] Video set to public, reloading iframe...');
-        // Wait 2 seconds for Cloudflare to propagate, then reload
-        await new Promise(r => setTimeout(r, 2000));
+        console.log('[StreamPlayer] Video set to public, waiting 3s for Cloudflare propagation...');
+        // Wait 3 seconds for Cloudflare to propagate fully, then reload
+        await new Promise(r => setTimeout(r, 3000));
         setIframeKey(prev => prev + 1);
         setHasError(false);
         setIsProcessing(false);
@@ -118,7 +126,7 @@ export const StreamPlayer = memo(({
     }
     
     return false;
-  }, [uid, ensurePublicAttempted]);
+  }, [uid, ensurePublicRetryCount, MAX_ENSURE_PUBLIC_RETRIES]);
 
   // Check video status when there's an error or processing state
   const checkVideoStatus = useCallback(async () => {
@@ -133,7 +141,7 @@ export const StreamPlayer = memo(({
       if (error) {
         console.warn('[StreamPlayer] Status check error:', error);
         // If status check fails, try ensure-public as fallback
-        if (!ensurePublicAttempted) {
+        if (ensurePublicRetryCount < MAX_ENSURE_PUBLIC_RETRIES) {
           await tryEnsurePublic();
         }
         return;
@@ -160,7 +168,7 @@ export const StreamPlayer = memo(({
     } catch (err) {
       console.error('[StreamPlayer] Status check exception:', err);
     }
-  }, [uid, ensurePublicAttempted, tryEnsurePublic]);
+  }, [uid, ensurePublicRetryCount, MAX_ENSURE_PUBLIC_RETRIES, tryEnsurePublic]);
 
   // Auto-check video status when error or processing
   useEffect(() => {
@@ -231,15 +239,15 @@ export const StreamPlayer = memo(({
             onReady?.();
           }}
           onError={async () => {
-            console.log('[StreamPlayer] Iframe error, attempting recovery...');
-            // Try ensure-public first before showing error
-            if (!ensurePublicAttempted && uid) {
+            console.log('[StreamPlayer] Iframe error, attempting recovery... (retry count:', ensurePublicRetryCount, ')');
+            // Try ensure-public with retry support
+            if (ensurePublicRetryCount < MAX_ENSURE_PUBLIC_RETRIES && uid) {
               const recovered = await tryEnsurePublic();
               if (recovered) {
                 return; // Will reload iframe automatically
               }
             }
-            // If recovery failed, show processing state
+            // If recovery failed or max retries reached, show processing state
             setIsProcessing(true);
             setHasError(true);
           }}
