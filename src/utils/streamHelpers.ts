@@ -1,61 +1,109 @@
 /**
- * Cloudflare Stream Video Helpers
+ * Video Helpers (R2 based)
  * Centralized utilities for video deletion and management
  */
 
 import { supabase } from '@/integrations/supabase/client';
-import { extractStreamUid, isStreamUrl } from './streamUpload';
+import { extractMediaKey, isMediaKey } from '@/config/media';
 
 /**
- * Delete a video from Cloudflare Stream by URL
- * Extracts UID and calls the stream-video edge function
+ * Check if URL is a video URL (R2 or legacy Stream)
+ */
+export function isVideoUrl(url: string): boolean {
+  if (!url) return false;
+  // R2 videos
+  if (url.includes('/videos/') || url.endsWith('.mp4') || url.endsWith('.webm') || url.endsWith('.mov')) {
+    return true;
+  }
+  // Legacy Cloudflare Stream URLs (backward compatible)
+  if (url.includes('videodelivery.net') || url.includes('cloudflarestream.com')) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Check if URL is a legacy Cloudflare Stream URL
+ */
+export function isStreamUrl(url: string): boolean {
+  if (!url) return false;
+  return url.includes('videodelivery.net') || url.includes('cloudflarestream.com');
+}
+
+/**
+ * Extract video UID from legacy Cloudflare Stream URL (for backward compatibility)
+ */
+export function extractStreamUid(url: string): string | null {
+  const patterns = [
+    /videodelivery\.net\/([a-f0-9]{32})/i,
+    /cloudflarestream\.com\/([a-f0-9]{32})/i,
+  ];
+  
+  for (const pattern of patterns) {
+    const match = url.match(pattern);
+    if (match) {
+      return match[1];
+    }
+  }
+  
+  return null;
+}
+
+/**
+ * Delete a video from R2 by URL or key
  * 
- * @param videoUrl - Cloudflare Stream video URL
+ * @param videoUrl - R2 video URL or key
  * @returns true if deletion was successful, false otherwise
  */
-export async function deleteStreamVideoByUrl(videoUrl: string): Promise<boolean> {
-  const uid = extractStreamUid(videoUrl);
-  if (!uid) {
-    console.warn('[streamHelpers] Could not extract UID from URL:', videoUrl);
+export async function deleteVideoByUrl(videoUrl: string): Promise<boolean> {
+  // Skip legacy Stream URLs - they can't be deleted via R2
+  if (isStreamUrl(videoUrl)) {
+    console.warn('[videoHelpers] Cannot delete legacy Stream URL via R2:', videoUrl);
+    return false;
+  }
+
+  const key = extractMediaKey(videoUrl);
+  if (!key) {
+    console.warn('[videoHelpers] Could not extract key from URL:', videoUrl);
     return false;
   }
   
-  return deleteStreamVideoByUid(uid);
+  return deleteVideoByKey(key);
 }
 
 /**
- * Delete a video from Cloudflare Stream by UID
+ * Delete a video from R2 by key
  * 
- * @param uid - Cloudflare Stream video UID
+ * @param key - R2 object key (e.g., videos/timestamp-random.mp4)
  * @returns true if deletion was successful, false otherwise
  */
-export async function deleteStreamVideoByUid(uid: string): Promise<boolean> {
+export async function deleteVideoByKey(key: string): Promise<boolean> {
   try {
-    console.log('[streamHelpers] Deleting Stream video:', uid);
-    const { data, error } = await supabase.functions.invoke('stream-video', {
-      body: { action: 'delete', uid },
+    console.log('[videoHelpers] Deleting R2 video:', key);
+    const { error } = await supabase.functions.invoke('delete-from-r2', {
+      body: { key },
     });
     
     if (error) {
-      console.error('[streamHelpers] Stream video delete error:', error);
+      console.error('[videoHelpers] R2 video delete error:', error);
       return false;
     }
     
-    console.log('[streamHelpers] Stream video deleted successfully:', uid, data);
+    console.log('[videoHelpers] R2 video deleted successfully:', key);
     return true;
   } catch (error) {
-    console.error('[streamHelpers] Failed to delete Stream video:', error);
+    console.error('[videoHelpers] Failed to delete R2 video:', error);
     return false;
   }
 }
 
 /**
- * Delete multiple Stream videos in parallel
+ * Delete multiple videos in parallel
  * 
- * @param videoUrls - Array of Cloudflare Stream video URLs
+ * @param videoUrls - Array of video URLs (R2 or legacy Stream)
  * @returns Object with success count and total count
  */
-export async function deleteStreamVideos(videoUrls: string[]): Promise<{ 
+export async function deleteVideos(videoUrls: string[]): Promise<{ 
   successCount: number; 
   totalCount: number 
 }> {
@@ -63,35 +111,43 @@ export async function deleteStreamVideos(videoUrls: string[]): Promise<{
     return { successCount: 0, totalCount: 0 };
   }
   
-  console.log('[streamHelpers] Deleting', videoUrls.length, 'videos');
-  const results = await Promise.all(videoUrls.map(deleteStreamVideoByUrl));
-  const successCount = results.filter(Boolean).length;
-  console.log('[streamHelpers] Deleted', successCount, 'of', videoUrls.length, 'videos');
+  // Filter out legacy Stream URLs
+  const r2Videos = videoUrls.filter(url => !isStreamUrl(url));
+  const streamVideos = videoUrls.filter(url => isStreamUrl(url));
   
-  return { successCount, totalCount: videoUrls.length };
+  if (streamVideos.length > 0) {
+    console.warn('[videoHelpers] Skipping', streamVideos.length, 'legacy Stream videos');
+  }
+  
+  console.log('[videoHelpers] Deleting', r2Videos.length, 'R2 videos');
+  const results = await Promise.all(r2Videos.map(deleteVideoByUrl));
+  const successCount = results.filter(Boolean).length;
+  console.log('[videoHelpers] Deleted', successCount, 'of', r2Videos.length, 'videos');
+  
+  return { successCount, totalCount: r2Videos.length };
 }
 
 /**
- * Extract all Stream video URLs from a post's media
+ * Extract all video URLs from a post's media
  * 
  * @param post - Post object with video_url and media_urls
- * @returns Array of Stream video URLs
+ * @returns Array of video URLs
  */
-export function extractPostStreamVideos(post: {
+export function extractPostVideos(post: {
   video_url?: string | null;
   media_urls?: Array<{ url: string; type: 'image' | 'video' }> | null;
 }): string[] {
   const videoUrls: string[] = [];
   
   // Check legacy video_url
-  if (post.video_url && isStreamUrl(post.video_url)) {
+  if (post.video_url && isVideoUrl(post.video_url)) {
     videoUrls.push(post.video_url);
   }
   
   // Check media_urls array for videos
   if (post.media_urls && Array.isArray(post.media_urls)) {
     post.media_urls.forEach((media) => {
-      if (media.type === 'video' && isStreamUrl(media.url)) {
+      if (media.type === 'video' && isVideoUrl(media.url)) {
         videoUrls.push(media.url);
       }
     });
@@ -100,5 +156,23 @@ export function extractPostStreamVideos(post: {
   return videoUrls;
 }
 
-// Re-export commonly used functions for convenience
-export { extractStreamUid, isStreamUrl } from './streamUpload';
+/**
+ * Format bytes to human readable string
+ */
+export function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
+}
+
+/**
+ * Format duration in seconds to human readable string
+ */
+export function formatDuration(seconds: number): string {
+  if (!seconds || seconds < 0) return '0:00';
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+}

@@ -9,7 +9,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { Link } from 'react-router-dom';
 import { formatRelativeTime } from '@/lib/formatters';
-import { deleteStreamVideoByUrl, isStreamUrl } from '@/utils/streamHelpers';
+import { deleteVideoByUrl, isVideoUrl } from '@/utils/streamHelpers';
 import { useLanguage } from '@/i18n/LanguageContext';
 import {
   DropdownMenu,
@@ -75,9 +75,9 @@ export const CommentItem = ({
 
     setDeleting(true);
     
-    // Delete video from Cloudflare Stream first if exists
-    if (comment.video_url && isStreamUrl(comment.video_url)) {
-      await deleteStreamVideoByUrl(comment.video_url);
+    // Delete video from R2 first if exists
+    if (comment.video_url && isVideoUrl(comment.video_url)) {
+      await deleteVideoByUrl(comment.video_url);
     }
     
     const { error } = await supabase

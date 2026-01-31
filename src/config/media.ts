@@ -16,8 +16,9 @@ export const MEDIA_PATHS = {
 } as const;
 
 /**
- * Check if a URL is a Cloudflare Stream video URL
+ * Check if a URL is a legacy Cloudflare Stream video URL
  * Stream videos use videodelivery.net or cloudflarestream.com domains
+ * These are kept for backward compatibility with old posts
  */
 export function isCloudflareStreamUrl(url: string | null | undefined): boolean {
   if (!url) return false;
@@ -27,12 +28,12 @@ export function isCloudflareStreamUrl(url: string | null | undefined): boolean {
 /**
  * Build full URL từ media key
  * Backward compatible: nếu đã là full URL, trả về nguyên vẹn
- * Stream URLs: trả về nguyên vẹn (không transform)
+ * Stream URLs: trả về nguyên vẹn (legacy support)
  */
 export function getMediaUrl(key: string | null | undefined): string {
   if (!key) return '/placeholder.svg';
   
-  // Nếu là Cloudflare Stream URL, trả về nguyên vẹn (không transform qua R2)
+  // Nếu là Cloudflare Stream URL (legacy), trả về nguyên vẹn
   if (isCloudflareStreamUrl(key)) {
     return key;
   }
@@ -55,6 +56,11 @@ export function extractMediaKey(url: string | null | undefined): string {
   // Nếu đã là key (không phải URL), trả về nguyên vẹn
   if (!url.startsWith('http://') && !url.startsWith('https://')) {
     return url;
+  }
+  
+  // Skip legacy Stream URLs - they don't have extractable keys for R2
+  if (isCloudflareStreamUrl(url)) {
+    return '';
   }
   
   try {

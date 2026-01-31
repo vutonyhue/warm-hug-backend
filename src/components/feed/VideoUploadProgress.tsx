@@ -1,7 +1,7 @@
 import { memo, useState } from 'react';
 import { Progress } from '@/components/ui/progress';
 import { Loader2, CheckCircle2, XCircle, Upload, Clock, Zap, Film } from 'lucide-react';
-import { formatBytes, formatDuration } from '@/utils/streamUpload';
+import { formatBytes, formatDuration } from '@/utils/streamHelpers';
 
 export type VideoUploadState = 
   | 'idle'
