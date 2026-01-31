@@ -236,7 +236,7 @@ export type Database = {
         Row: {
           avatar_url: string | null
           created_at: string | null
-          created_by: string | null
+          created_by: string
           id: string
           last_message_at: string | null
           last_message_preview: string | null
@@ -247,7 +247,7 @@ export type Database = {
         Insert: {
           avatar_url?: string | null
           created_at?: string | null
-          created_by?: string | null
+          created_by?: string
           id?: string
           last_message_at?: string | null
           last_message_preview?: string | null
@@ -258,7 +258,7 @@ export type Database = {
         Update: {
           avatar_url?: string | null
           created_at?: string | null
-          created_by?: string | null
+          created_by?: string
           id?: string
           last_message_at?: string | null
           last_message_preview?: string | null
