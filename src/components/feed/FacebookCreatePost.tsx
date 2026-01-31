@@ -5,7 +5,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { uploadToR2 } from '@/utils/r2Upload';
 import { getMediaUrl } from '@/config/media';
 import { isSessionExpired, getValidSession } from '@/utils/authHelpers';
-import { deleteStreamVideoByUid } from '@/utils/streamHelpers';
+import { deleteVideoByKey } from '@/utils/streamHelpers';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -74,7 +74,7 @@ export const FacebookCreatePost = ({ onPostCreated }: FacebookCreatePostProps) =
   
   // Uppy video upload state
   const [pendingVideoFile, setPendingVideoFile] = useState<File | null>(null);
-  const [uppyVideoResult, setUppyVideoResult] = useState<{ uid: string; url: string; thumbnailUrl: string; localThumbnail?: string } | null>(null);
+  const [uppyVideoResult, setUppyVideoResult] = useState<{ key: string; url: string; thumbnailUrl: string; localThumbnail?: string } | null>(null);
   const [isVideoUploading, setIsVideoUploading] = useState(false);
   
   // Enhanced upload progress state
@@ -835,9 +835,9 @@ export const FacebookCreatePost = ({ onPostCreated }: FacebookCreatePostProps) =
                       variant="ghost"
                       size="icon"
                       onClick={() => {
-                        // Delete the video from Cloudflare Stream to prevent orphans
-                        if (uppyVideoResult?.uid) {
-                          deleteStreamVideoByUid(uppyVideoResult.uid);
+                        // Delete the video from R2 to prevent orphans
+                        if (uppyVideoResult?.key) {
+                          deleteVideoByKey(uppyVideoResult.key);
                         }
                         setUppyVideoResult(null);
                       }}

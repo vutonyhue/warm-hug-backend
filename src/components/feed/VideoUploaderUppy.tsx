@@ -1,14 +1,14 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import * as tus from 'tus-js-client';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Video, X, Loader2, CheckCircle, AlertCircle, Clock, RefreshCw, Wifi, WifiOff } from 'lucide-react';
 import { toast } from 'sonner';
-import { deleteStreamVideoByUid } from '@/utils/streamHelpers';
+import { deleteVideoByKey } from '@/utils/streamHelpers';
+import { getMediaUrl } from '@/config/media';
 
 interface VideoUploaderUppyProps {
-  onUploadComplete: (result: { uid: string; url: string; thumbnailUrl: string; localThumbnail?: string }) => void;
+  onUploadComplete: (result: { key: string; url: string; thumbnailUrl: string; localThumbnail?: string }) => void;
   onUploadError?: (error: Error) => void;
   onUploadStart?: () => void;
   onRemove?: () => void;
@@ -22,7 +22,7 @@ interface UploadState {
   bytesUploaded: number;
   bytesTotal: number;
   uploadSpeed: number;
-  videoUid?: string;
+  videoKey?: string;
   error?: string;
   localThumbnail?: string;
 }
@@ -34,13 +34,12 @@ interface DebugTimeline {
   invokeStarted?: number;
   invokeFinished?: number;
   invokeError?: string;
-  tusStarted?: number;
+  uploadStarted?: number;
   firstProgress?: number;
   lastStep: string;
 }
 
-const CHUNK_SIZE = 50 * 1024 * 1024;
-const BACKEND_TIMEOUT_MS = 20000; // 20 seconds timeout for backend calls
+const BACKEND_TIMEOUT_MS = 45000; // 45 seconds timeout for getting presigned URL
 
 /**
  * Generate a thumbnail from video file using canvas
@@ -91,114 +90,92 @@ const generateVideoThumbnail = (file: File): Promise<string> => {
 };
 
 /**
- * Call edge function using native fetch with proper AbortController support
- * This fixes the timeout issue where supabase.functions.invoke doesn't properly abort
+ * Get presigned URL from edge function
  */
-async function callEdgeFunctionWithTimeout<T>(
-  functionName: string,
-  body: Record<string, unknown>,
-  timeoutMs: number = BACKEND_TIMEOUT_MS,
-  externalAbortController?: AbortController | null
-): Promise<{ data: T | null; error: Error | null; statusCode?: number; responseText?: string }> {
-  const controller = externalAbortController || new AbortController();
-  const timeoutId = setTimeout(() => {
-    console.log(`[callEdgeFunctionWithTimeout] Timeout reached (${timeoutMs}ms), aborting...`);
-    controller.abort();
-  }, timeoutMs);
+async function getPresignedUrl(
+  key: string,
+  contentType: string,
+  fileSize: number,
+  timeoutMs: number = BACKEND_TIMEOUT_MS
+): Promise<{ uploadUrl: string; publicUrl: string }> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    // Get session for auth token
     const { data: sessionData } = await supabase.auth.getSession();
     const accessToken = sessionData?.session?.access_token;
+    
+    if (!accessToken) {
+      throw new Error('Chưa đăng nhập');
+    }
 
-    // Build URL to edge function
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-    const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-    const functionUrl = `${supabaseUrl}/functions/v1/${functionName}`;
+    const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
-    console.log(`[callEdgeFunctionWithTimeout] Calling ${functionName}...`);
-
-    const response = await fetch(functionUrl, {
+    const response = await fetch(`${supabaseUrl}/functions/v1/get-upload-url`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'apikey': anonKey,
-        ...(accessToken ? { 'Authorization': `Bearer ${accessToken}` } : {}),
+        'Authorization': `Bearer ${accessToken}`,
+        'apikey': supabaseKey,
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ key, contentType, fileSize }),
       signal: controller.signal,
     });
 
-    clearTimeout(timeoutId);
-
-    const responseText = await response.text();
-    
-    console.log(`[callEdgeFunctionWithTimeout] Response status: ${response.status}`);
-
     if (!response.ok) {
-      // Try to parse error from JSON
-      let errorMessage = `HTTP ${response.status}`;
-      try {
-        const errJson = JSON.parse(responseText);
-        errorMessage = errJson.error || errJson.message || errorMessage;
-        if (errJson.details) {
-          errorMessage += `: ${errJson.details}`;
-        }
-      } catch {
-        errorMessage = responseText.slice(0, 200) || errorMessage;
-      }
-      
-      return { 
-        data: null, 
-        error: new Error(errorMessage), 
-        statusCode: response.status,
-        responseText: responseText.slice(0, 500),
-      };
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || `HTTP ${response.status}`);
     }
 
-    // Parse successful response
-    let data: T;
-    try {
-      data = JSON.parse(responseText);
-    } catch {
-      return { 
-        data: null, 
-        error: new Error('Invalid JSON response from backend'),
-        statusCode: response.status,
-        responseText: responseText.slice(0, 500),
-      };
+    const data = await response.json();
+    if (!data.uploadUrl || !data.publicUrl) {
+      throw new Error('Invalid response from server');
     }
 
-    return { data, error: null, statusCode: response.status };
-  } catch (err) {
+    return { uploadUrl: data.uploadUrl, publicUrl: data.publicUrl };
+  } finally {
     clearTimeout(timeoutId);
-    
-    if (err instanceof Error) {
-      if (err.name === 'AbortError') {
-        console.log('[callEdgeFunctionWithTimeout] Request aborted');
-        return { 
-          data: null, 
-          error: new Error(`Backend timeout (${timeoutMs / 1000}s) - vui lòng thử lại`),
-          statusCode: 0,
-        };
-      }
-      
-      // Network errors (CORS, blocked, offline)
-      if (err.message === 'Failed to fetch' || err.message.includes('NetworkError')) {
-        return { 
-          data: null, 
-          error: new Error('Không kết nối được tới server. Có thể bị chặn bởi AdBlock/Firewall hoặc mạng không ổn định.'),
-          statusCode: 0,
-        };
-      }
-    }
-    
-    return { 
-      data: null, 
-      error: err instanceof Error ? err : new Error('Unknown error'),
-      statusCode: 0,
-    };
   }
+}
+
+/**
+ * Upload video directly to R2 with progress tracking
+ */
+async function uploadToR2WithProgress(
+  file: File,
+  uploadUrl: string,
+  onProgress: (loaded: number, total: number) => void
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    
+    xhr.upload.addEventListener('progress', (event) => {
+      if (event.lengthComputable) {
+        onProgress(event.loaded, event.total);
+      }
+    });
+    
+    xhr.addEventListener('load', () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve();
+      } else {
+        reject(new Error(`Upload failed: HTTP ${xhr.status}`));
+      }
+    });
+    
+    xhr.addEventListener('error', () => {
+      reject(new Error('Upload failed - network error'));
+    });
+    
+    xhr.addEventListener('abort', () => {
+      reject(new Error('Upload cancelled'));
+    });
+    
+    xhr.open('PUT', uploadUrl);
+    xhr.setRequestHeader('Content-Type', file.type);
+    xhr.send(file);
+  });
 }
 
 export const VideoUploaderUppy = ({
@@ -222,7 +199,7 @@ export const VideoUploaderUppy = ({
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [backendHealthy, setBackendHealthy] = useState<boolean | null>(null);
   
-  const tusUploadRef = useRef<tus.Upload | null>(null);
+  const xhrRef = useRef<XMLHttpRequest | null>(null);
   const lastBytesRef = useRef(0);
   const lastTimeRef = useRef(Date.now());
   const isUploadingRef = useRef(false);
@@ -249,87 +226,29 @@ export const VideoUploaderUppy = ({
     return () => clearInterval(interval);
   }, [uploadState.status]);
 
-  // Track if we've done auto health check
-  const autoHealthCheckDoneRef = useRef(false);
-
-  // Test backend health - define before useEffect that uses it
-  const testBackendHealth = useCallback(async () => {
-    setBackendHealthy(null);
-    console.log('[VideoUploader] Testing backend health...');
-    
-    const startTime = Date.now();
-    const { data, error, statusCode } = await callEdgeFunctionWithTimeout<{ 
-      ok: boolean; 
-      userId?: string; 
-      ts?: string;
-      authenticated?: boolean;
-      cloudflareConfigured?: boolean;
-    }>(
-      'stream-video',
-      { action: 'health' },
-      10000 // 10s timeout for health check
-    );
-
-    const elapsed = Date.now() - startTime;
-    
-    if (error) {
-      console.error('[VideoUploader] Backend health check failed:', error.message, 'status:', statusCode);
-      setBackendHealthy(false);
-      toast.error(`Backend không phản hồi: ${error.message}`);
-      
-      setDebugTimeline(prev => ({
-        ...prev,
-        lastStep: `health check failed: ${error.message} (${statusCode || 'no status'})`,
-      }));
-    } else if (data?.ok) {
-      console.log('[VideoUploader] Backend healthy:', data, `(${elapsed}ms)`);
-      setBackendHealthy(true);
-      const authInfo = data.authenticated ? `✓ Auth (${data.userId?.slice(0, 8)}...)` : '✗ No auth';
-      toast.success(`Backend OK (${elapsed}ms) - ${authInfo}`);
-      
-      setDebugTimeline(prev => ({
-        ...prev,
-        lastStep: `health OK: ${elapsed}ms, auth=${data.authenticated}`,
-      }));
-    } else {
-      console.warn('[VideoUploader] Backend returned unexpected response:', data);
-      setBackendHealthy(false);
-      toast.error('Backend trả về dữ liệu không hợp lệ');
-    }
-  }, []);
-
-  // Show debug panel automatically if stuck for 5+ seconds, and run auto health check
+  // Show debug panel automatically if stuck for 5+ seconds
   useEffect(() => {
     if (uploadState.status === 'preparing' && elapsedSeconds >= 5) {
       setShowDebug(true);
-      
-      // Auto health check once when stuck for 8+ seconds
-      if (elapsedSeconds >= 8 && !autoHealthCheckDoneRef.current && backendHealthy === null) {
-        autoHealthCheckDoneRef.current = true;
-        console.log('[VideoUploader] Auto health check triggered (stuck 8s+)');
-        testBackendHealth();
-      }
     }
     
-    // Reset auto health check flag when status changes
     if (uploadState.status !== 'preparing') {
-      autoHealthCheckDoneRef.current = false;
+      setShowDebug(false);
     }
-  }, [uploadState.status, elapsedSeconds, backendHealthy, testBackendHealth]);
+  }, [uploadState.status, elapsedSeconds]);
 
-  // Cleanup on unmount - delete orphan video if upload wasn't completed
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
-      if (tusUploadRef.current) {
-        tusUploadRef.current.abort();
-        tusUploadRef.current = null;
+      if (xhrRef.current) {
+        xhrRef.current.abort();
+        xhrRef.current = null;
       }
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
         abortControllerRef.current = null;
       }
       
-      // Reset refs on unmount
       currentFileRef.current = null;
       uploadStartedRef.current = false;
     };
@@ -349,11 +268,36 @@ export const VideoUploaderUppy = ({
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, []);
 
+  // Test backend health
+  const testBackendHealth = useCallback(async () => {
+    setBackendHealthy(null);
+    console.log('[VideoUploader] Testing backend health...');
+    
+    try {
+      const startTime = Date.now();
+      const { data: sessionData } = await supabase.auth.getSession();
+      
+      if (!sessionData?.session) {
+        setBackendHealthy(false);
+        toast.error('Chưa đăng nhập');
+        return;
+      }
+      
+      const elapsed = Date.now() - startTime;
+      console.log('[VideoUploader] Auth check OK:', elapsed, 'ms');
+      setBackendHealthy(true);
+      toast.success(`Auth OK (${elapsed}ms)`);
+    } catch (err) {
+      console.error('[VideoUploader] Health check failed:', err);
+      setBackendHealthy(false);
+      toast.error('Backend không phản hồi');
+    }
+  }, []);
+
   // Retry upload
   const handleRetry = useCallback(() => {
     if (!selectedFile) return;
     
-    // Reset state to trigger re-upload
     uploadStartedRef.current = false;
     currentFileRef.current = null;
     setDebugTimeline({ lastStep: 'retrying' });
@@ -366,9 +310,7 @@ export const VideoUploaderUppy = ({
       uploadSpeed: 0,
     });
     
-    // Force effect to re-run by setting a small delay
     setTimeout(() => {
-      // The useEffect will pick up selectedFile again
       setUploadState(prev => ({ ...prev }));
     }, 100);
   }, [selectedFile]);
@@ -377,36 +319,28 @@ export const VideoUploaderUppy = ({
   useEffect(() => {
     if (!selectedFile) return;
 
-    // Generate a unique file identifier to prevent duplicate uploads
     const fileId = `${selectedFile.name}_${selectedFile.size}_${selectedFile.lastModified}`;
     
-    // Prevent duplicate upload for the same file
     if (currentFileRef.current === fileId && uploadStartedRef.current) {
-      console.log('[VideoUploader] Upload already started for this file, skipping duplicate');
+      console.log('[VideoUploader] Upload already started for this file, skipping');
       return;
     }
     
-    // If already uploading a different file, abort first
-    if (tusUploadRef.current && currentFileRef.current !== fileId) {
-      console.log('[VideoUploader] Aborting previous upload to start new one');
-      tusUploadRef.current.abort();
-      tusUploadRef.current = null;
+    if (xhrRef.current && currentFileRef.current !== fileId) {
+      console.log('[VideoUploader] Aborting previous upload');
+      xhrRef.current.abort();
+      xhrRef.current = null;
       isUploadingRef.current = false;
     }
 
     const startUpload = async () => {
-      // Double-check to prevent race conditions
       if (uploadStartedRef.current && currentFileRef.current === fileId) {
-        console.log('[VideoUploader] Upload already in progress for this file');
         return;
       }
       
-      // Mark this file as being uploaded
       currentFileRef.current = fileId;
       uploadStartedRef.current = true;
       startTimeRef.current = Date.now();
-      
-      // Create new abort controller
       abortControllerRef.current = new AbortController();
       
       try {
@@ -428,9 +362,9 @@ export const VideoUploaderUppy = ({
 
         onUploadStart?.();
 
-        console.log('[VideoUploader] Starting upload, file:', fileId);
+        console.log('[VideoUploader] Starting R2 upload, file:', fileId);
 
-        // Generate local thumbnail immediately (don't await - run in parallel)
+        // Generate local thumbnail in parallel
         generateVideoThumbnail(selectedFile)
           .then(thumb => {
             localThumbnailRef.current = thumb;
@@ -441,103 +375,64 @@ export const VideoUploaderUppy = ({
             console.warn('[VideoUploader] Failed to generate local thumbnail:', err);
           });
 
-        // Step 1: Get Direct Upload URL from our backend (with timeout)
-        console.log('[VideoUploader] Requesting upload URL from backend...');
+        // Generate unique key for R2
+        const timestamp = Date.now();
+        const randomString = Math.random().toString(36).substring(2, 15);
+        const extension = selectedFile.name.split('.').pop() || 'mp4';
+        const key = `videos/${timestamp}-${randomString}.${extension}`;
+        
+        console.log('[VideoUploader] Requesting presigned URL for key:', key);
         
         setDebugTimeline(prev => ({
           ...prev,
           invokeStarted: Date.now(),
-          lastStep: 'calling backend',
+          lastStep: 'getting presigned URL',
         }));
 
-        const { data, error, statusCode, responseText } = await callEdgeFunctionWithTimeout<{ uploadUrl: string; uid: string }>(
-          'stream-video',
-          {
-            action: 'get-tus-upload-url',
-            fileSize: selectedFile.size,
-            fileName: selectedFile.name,
-            fileType: selectedFile.type,
-            fileId, // Send file identifier for deduplication tracking
-          },
-          BACKEND_TIMEOUT_MS,
-          abortControllerRef.current // Pass abort controller for cancel support
+        const { uploadUrl, publicUrl } = await getPresignedUrl(
+          key,
+          selectedFile.type,
+          selectedFile.size,
+          BACKEND_TIMEOUT_MS
         );
 
         const invokeTime = Date.now();
-        const invokeElapsed = invokeTime - (debugTimeline.invokeStarted || invokeTime);
         
         setDebugTimeline(prev => ({
           ...prev,
           invokeFinished: invokeTime,
-          invokeError: error?.message,
-          lastStep: error 
-            ? `backend error (${statusCode || 'timeout'}): ${error.message.slice(0, 100)}` 
-            : `got upload URL (${invokeElapsed}ms)`,
+          lastStep: 'got presigned URL',
         }));
 
-        if (error) {
-          console.error('[VideoUploader] Failed to get upload URL:', {
-            error: error.message,
-            statusCode,
-            responseText: responseText?.slice(0, 200),
-          });
-          throw error;
-        }
+        console.log('[VideoUploader] Got presigned URL, starting upload');
 
-        if (!data) {
-          throw new Error('Backend trả về dữ liệu rỗng');
-        }
-
-        const { uploadUrl, uid } = data;
-
-        if (!uploadUrl || !uid) {
-          console.error('[VideoUploader] Invalid response:', data);
-          throw new Error(`Không nhận được URL/UID từ server (uploadUrl: ${!!uploadUrl}, uid: ${!!uid})`);
-        }
-
-        console.log('[VideoUploader] Got Direct Upload URL:', {
-          uploadUrl: uploadUrl.substring(0, 80),
-          uid,
-        });
-
-        // Save UID to state
         setUploadState(prev => ({
           ...prev,
-          videoUid: uid,
+          videoKey: key,
           status: 'uploading',
         }));
 
         setDebugTimeline(prev => ({
           ...prev,
-          tusStarted: Date.now(),
-          lastStep: 'starting TUS upload',
+          uploadStarted: Date.now(),
+          lastStep: 'uploading to R2',
         }));
 
-        // Step 2: Upload directly to Cloudflare using tus-js-client
-        // NO AUTH HEADERS NEEDED - this is a Direct Creator Upload URL
-        const upload = new tus.Upload(selectedFile, {
-          uploadUrl, // Use the pre-signed URL directly
-          chunkSize: CHUNK_SIZE,
-          retryDelays: [0, 1000, 3000, 5000, 10000],
-          removeFingerprintOnSuccess: true,
-          // No headers needed for Direct Creator Upload!
-          headers: {},
-          metadata: {
-            filename: selectedFile.name,
-            filetype: selectedFile.type,
-          },
-          onProgress: (bytesUploaded, bytesTotal) => {
+        // Upload directly to R2 with progress
+        await uploadToR2WithProgress(
+          selectedFile,
+          uploadUrl,
+          (loaded, total) => {
             const now = Date.now();
             const timeDiff = (now - lastTimeRef.current) / 1000;
-            const bytesDiff = bytesUploaded - lastBytesRef.current;
+            const bytesDiff = loaded - lastBytesRef.current;
             const speed = timeDiff > 0 ? bytesDiff / timeDiff : 0;
 
-            lastBytesRef.current = bytesUploaded;
+            lastBytesRef.current = loaded;
             lastTimeRef.current = now;
 
-            const progress = Math.round((bytesUploaded / bytesTotal) * 100);
+            const progress = Math.round((loaded / total) * 100);
 
-            // Log first progress
             if (!debugTimeline.firstProgress) {
               console.log('[VideoUploader] First progress tick:', progress + '%');
               setDebugTimeline(prev => ({
@@ -550,154 +445,50 @@ export const VideoUploaderUppy = ({
             setUploadState(prev => ({
               ...prev,
               progress,
-              bytesUploaded,
-              bytesTotal,
+              bytesUploaded: loaded,
+              bytesTotal: total,
               uploadSpeed: speed > 0 ? speed : prev.uploadSpeed,
             }));
-          },
-          onSuccess: async () => {
-            console.log('[VideoUploader] Upload complete! UID:', uid);
+          }
+        );
 
-            setDebugTimeline(prev => ({
-              ...prev,
-              lastStep: 'upload complete, updating settings',
-            }));
+        console.log('[VideoUploader] Upload complete! Key:', key);
 
-            setUploadState(prev => ({
-              ...prev,
-              status: 'processing',
-              progress: 100,
-            }));
+        // Build final URL
+        const finalUrl = getMediaUrl(key);
+        
+        setUploadState(prev => ({
+          ...prev,
+          status: 'ready',
+          progress: 100,
+        }));
 
-            // Update video settings with retry logic to ensure video is public
-            let settingsUpdated = false;
-            for (let attempt = 1; attempt <= 3; attempt++) {
-              try {
-                console.log(`[VideoUploader] Updating video settings (attempt ${attempt}/3)...`);
-                const { error } = await supabase.functions.invoke('stream-video', {
-                  body: {
-                    action: 'update-video-settings',
-                    uid,
-                    requireSignedURLs: false,
-                    allowedOrigins: ['*'],
-                  },
-                });
-                
-                if (!error) {
-                  console.log('[VideoUploader] Video settings updated successfully');
-                  settingsUpdated = true;
-                  break;
-                }
-                console.warn(`[VideoUploader] Settings update attempt ${attempt} failed:`, error);
-              } catch (err) {
-                console.warn(`[VideoUploader] Settings update attempt ${attempt} error:`, err);
-              }
-              
-              // Wait 1 second before retry
-              if (attempt < 3) {
-                await new Promise(r => setTimeout(r, 1000));
-              }
-            }
-            
-            // Verification step: Wait for Cloudflare to propagate, then verify settings
-            if (settingsUpdated) {
-              console.log('[VideoUploader] Waiting 1.5s for Cloudflare to propagate settings...');
-              await new Promise(r => setTimeout(r, 1500));
-              
-              try {
-                const { data: statusData } = await supabase.functions.invoke('stream-video', {
-                  body: { action: 'check-status', uid }
-                });
-                
-                // If requireSignedURLs is still true, call ensure-public as fallback
-                if (statusData?.requireSignedURLs !== false) {
-                  console.warn('[VideoUploader] Settings verification failed, calling ensure-public...');
-                  await supabase.functions.invoke('stream-video', {
-                    body: { action: 'ensure-public', uid }
-                  });
-                } else {
-                  console.log('[VideoUploader] Settings verified: video is public');
-                }
-              } catch (verifyErr) {
-                console.warn('[VideoUploader] Settings verification error:', verifyErr);
-              }
-            } else {
-              // Settings update failed, try ensure-public as last resort
-              console.error('[VideoUploader] Failed to update video settings, trying ensure-public...');
-              try {
-                await supabase.functions.invoke('stream-video', {
-                  body: { action: 'ensure-public', uid }
-                });
-                console.log('[VideoUploader] ensure-public called as fallback');
-              } catch (ensureErr) {
-                console.error('[VideoUploader] ensure-public failed:', ensureErr);
-                toast.warning('Video đã tải lên nhưng có thể cần thời gian để hiển thị');
-              }
-            }
+        setDebugTimeline(prev => ({
+          ...prev,
+          lastStep: 'ready',
+        }));
 
-            // Success!
-            const streamUrl = `https://iframe.videodelivery.net/${uid}`;
-            const cloudflareThumb = `https://videodelivery.net/${uid}/thumbnails/thumbnail.jpg?time=1s`;
-            
-            setUploadState(prev => ({
-              ...prev,
-              status: 'ready',
-            }));
-
-            setDebugTimeline(prev => ({
-              ...prev,
-              lastStep: 'ready',
-            }));
-
-            isUploadingRef.current = false;
-            toast.success('Video đã tải lên thành công!');
-            
-            // Pass both local and cloudflare thumbnails (read from ref to get latest value)
-            onUploadComplete({ 
-              uid, 
-              url: streamUrl, 
-              thumbnailUrl: cloudflareThumb,
-              localThumbnail: localThumbnailRef.current 
-            });
-          },
-          onError: (error) => {
-            console.error('[VideoUploader] TUS upload error:', error);
-            isUploadingRef.current = false;
-
-            const errorMsg = error?.message || 'Tải lên thất bại';
-            
-            setDebugTimeline(prev => ({
-              ...prev,
-              lastStep: `TUS error: ${errorMsg}`,
-            }));
-
-            setUploadState(prev => ({
-              ...prev,
-              status: 'error',
-              error: errorMsg,
-            }));
-
-            onUploadError?.(error || new Error('Upload failed'));
-            toast.error(`Tải lên thất bại: ${errorMsg}`);
-          },
+        isUploadingRef.current = false;
+        toast.success('Video đã tải lên thành công!');
+        
+        onUploadComplete({ 
+          key, 
+          url: finalUrl, 
+          thumbnailUrl: localThumbnailRef.current || '',
+          localThumbnail: localThumbnailRef.current 
         });
-
-        tusUploadRef.current = upload;
-
-        // Start the upload
-        console.log('[VideoUploader] Starting TUS upload to Cloudflare...');
-        upload.start();
 
       } catch (error) {
         console.error('[VideoUploader] Error:', error);
         isUploadingRef.current = false;
-        uploadStartedRef.current = false; // Allow retry
+        uploadStartedRef.current = false;
         currentFileRef.current = null;
 
         const errorMessage = error instanceof Error ? error.message : 'Lỗi không xác định';
         
         setDebugTimeline(prev => ({
           ...prev,
+          invokeError: errorMessage,
           lastStep: `error: ${errorMessage}`,
         }));
         
@@ -716,27 +507,25 @@ export const VideoUploaderUppy = ({
   }, [selectedFile, onUploadComplete, onUploadError, onUploadStart, debugTimeline.firstProgress]);
 
   const handleCancel = useCallback(async () => {
-    // Abort any pending backend request
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
     }
     
-    // Abort any in-progress upload
-    if (tusUploadRef.current) {
-      tusUploadRef.current.abort();
-      tusUploadRef.current = null;
+    if (xhrRef.current) {
+      xhrRef.current.abort();
+      xhrRef.current = null;
     }
+    
     isUploadingRef.current = false;
-    uploadStartedRef.current = false; // Allow new upload
+    uploadStartedRef.current = false;
     currentFileRef.current = null;
     
-    // Clean up any partially uploaded video from Cloudflare Stream
-    const uidToDelete = uploadState.videoUid;
-    if (uidToDelete) {
-      console.log('[VideoUploaderUppy] Cleaning up cancelled upload:', uidToDelete);
-      // Don't await - cleanup in background
-      deleteStreamVideoByUid(uidToDelete);
+    // Clean up any partially uploaded video from R2
+    const keyToDelete = uploadState.videoKey;
+    if (keyToDelete) {
+      console.log('[VideoUploader] Cleaning up cancelled upload:', keyToDelete);
+      deleteVideoByKey(keyToDelete);
     }
 
     setUploadState({
@@ -749,7 +538,7 @@ export const VideoUploaderUppy = ({
     setDebugTimeline({ lastStep: 'cancelled' });
     setElapsedSeconds(0);
     onRemove?.();
-  }, [onRemove, uploadState.videoUid]);
+  }, [onRemove, uploadState.videoKey]);
 
   const formatBytes = (bytes: number): string => {
     if (bytes === 0) return '0 B';
@@ -777,13 +566,12 @@ export const VideoUploaderUppy = ({
     return formatTime(seconds);
   };
 
-  // Don't render anything if idle and no file
   if (uploadState.status === 'idle' && !selectedFile) {
     return null;
   }
 
   return (
-    <div className="rounded-lg border border-border bg-card p-4" data-video-uid={uploadState.videoUid}>
+    <div className="rounded-lg border border-border bg-card p-4" data-video-key={uploadState.videoKey}>
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <Video className="w-5 h-5 text-primary" />
@@ -806,7 +594,7 @@ export const VideoUploaderUppy = ({
         )}
       </div>
 
-      {/* Preparing state with debug info */}
+      {/* Preparing state */}
       {uploadState.status === 'preparing' && (
         <div className="space-y-3">
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -814,7 +602,6 @@ export const VideoUploaderUppy = ({
             <span>Đang chuẩn bị... ({debugTimeline.lastStep})</span>
           </div>
           
-          {/* Show debug panel if stuck */}
           {showDebug && (
             <div className="p-3 bg-muted/50 rounded-lg text-xs space-y-2">
               <div className="flex items-center justify-between">
@@ -832,7 +619,7 @@ export const VideoUploaderUppy = ({
                   ) : (
                     <WifiOff className="w-3 h-3 text-red-500" />
                   )}
-                  Test Backend
+                  Test Auth
                 </Button>
               </div>
               
@@ -841,11 +628,11 @@ export const VideoUploaderUppy = ({
                   <div>T0: Preparing started</div>
                 )}
                 {debugTimeline.invokeStarted && (
-                  <div>T1: Backend call started (+{debugTimeline.invokeStarted - (debugTimeline.preparingStarted || 0)}ms)</div>
+                  <div>T1: Getting presigned URL (+{debugTimeline.invokeStarted - (debugTimeline.preparingStarted || 0)}ms)</div>
                 )}
                 {debugTimeline.invokeFinished && (
                   <div className={debugTimeline.invokeError ? 'text-red-500' : 'text-green-500'}>
-                    T2: Backend responded (+{debugTimeline.invokeFinished - (debugTimeline.invokeStarted || 0)}ms)
+                    T2: Got URL (+{debugTimeline.invokeFinished - (debugTimeline.invokeStarted || 0)}ms)
                     {debugTimeline.invokeError && ` - ${debugTimeline.invokeError}`}
                   </div>
                 )}
@@ -906,11 +693,10 @@ export const VideoUploaderUppy = ({
         </div>
       )}
 
-      {/* Processing state with thumbnail preview */}
-      {uploadState.status === 'processing' && uploadState.videoUid && (
+      {/* Processing state - quick for R2 */}
+      {uploadState.status === 'processing' && uploadState.videoKey && (
         <div className="space-y-3">
           <div className="relative rounded-lg overflow-hidden bg-muted h-32">
-            {/* Use local thumbnail first, fallback to Cloudflare */}
             {uploadState.localThumbnail ? (
               <img 
                 src={uploadState.localThumbnail}
@@ -924,20 +710,16 @@ export const VideoUploaderUppy = ({
             )}
             <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
               <Loader2 className="w-6 h-6 text-white animate-spin" />
-              <span className="text-white text-sm ml-2">Đang xử lý...</span>
+              <span className="text-white text-sm ml-2">Đang hoàn tất...</span>
             </div>
-          </div>
-          <div className="p-2 bg-blue-500/10 border border-blue-500/20 rounded text-xs text-blue-600 dark:text-blue-400">
-            🎬 Bé chờ một chút để có thể xem video nhé!
           </div>
         </div>
       )}
 
-      {/* Success state with thumbnail preview */}
-      {uploadState.status === 'ready' && uploadState.videoUid && (
+      {/* Success state */}
+      {uploadState.status === 'ready' && uploadState.videoKey && (
         <div className="space-y-2">
           <div className="relative rounded-lg overflow-hidden bg-muted h-32">
-            {/* Use local thumbnail first, fallback to Video icon */}
             {uploadState.localThumbnail ? (
               <img 
                 src={uploadState.localThumbnail}
@@ -962,7 +744,7 @@ export const VideoUploaderUppy = ({
               variant="ghost"
               size="sm"
               onClick={handleCancel}
-              className="h-6 text-xs text-muted-foreground hover:text-destructive"
+              className="h-6 text-xs text-destructive hover:text-destructive"
             >
               Xóa
             </Button>
@@ -973,46 +755,25 @@ export const VideoUploaderUppy = ({
       {/* Error state */}
       {uploadState.status === 'error' && (
         <div className="space-y-3">
-          <div className="flex items-center gap-2 text-sm text-destructive">
+          <div className="flex items-center gap-2 text-destructive">
             <AlertCircle className="w-4 h-4" />
-            <span>{uploadState.error || 'Đã xảy ra lỗi'}</span>
+            <span className="text-sm">{uploadState.error || 'Tải lên thất bại'}</span>
           </div>
-          
-          {/* Debug info for errors */}
-          <div className="p-3 bg-muted/50 rounded-lg text-xs space-y-2">
-            <div className="font-mono text-muted-foreground">
-              Last step: {debugTimeline.lastStep}
-            </div>
-            {debugTimeline.invokeError && (
-              <div className="font-mono text-red-500">
-                Backend: {debugTimeline.invokeError}
-              </div>
-            )}
-          </div>
-          
           <div className="flex gap-2">
             <Button
               variant="outline"
               size="sm"
               onClick={handleRetry}
-              className="gap-1"
+              className="h-8 text-xs gap-1"
             >
               <RefreshCw className="w-3 h-3" />
               Thử lại
             </Button>
             <Button
-              variant="outline"
-              size="sm"
-              onClick={testBackendHealth}
-              className="gap-1"
-            >
-              <Wifi className="w-3 h-3" />
-              Test Backend
-            </Button>
-            <Button
               variant="ghost"
               size="sm"
               onClick={handleCancel}
+              className="h-8 text-xs"
             >
               Hủy
             </Button>
@@ -1022,3 +783,5 @@ export const VideoUploaderUppy = ({
     </div>
   );
 };
+
+export default VideoUploaderUppy;

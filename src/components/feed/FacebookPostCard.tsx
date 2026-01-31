@@ -19,7 +19,7 @@ import { ReactionButton } from './ReactionButton';
 import { ReactionSummary } from './ReactionSummary';
 import { MediaGrid } from './MediaGrid';
 import { ExpandableContent } from './ExpandableContent';
-import { extractPostStreamVideos, deleteStreamVideos } from '@/utils/streamHelpers';
+import { extractPostVideos, deleteVideos } from '@/utils/streamHelpers';
 import { getMediaUrl, isCloudflareStreamUrl } from '@/config/media';
 import {
   MessageCircle,
@@ -230,10 +230,10 @@ const FacebookPostCardComponent = ({
     setIsDeleting(true);
     
     try {
-      const videoUrls = extractPostStreamVideos(post);
+      const videoUrls = extractPostVideos(post);
       
       if (videoUrls.length > 0) {
-        await deleteStreamVideos(videoUrls);
+        await deleteVideos(videoUrls);
       }
       
       const { error: deleteError } = await supabase.from('posts').delete().eq('id', post.id);

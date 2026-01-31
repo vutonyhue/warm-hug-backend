@@ -1,10 +1,7 @@
-import { useState, useRef, useEffect, VideoHTMLAttributes, memo, lazy, Suspense } from 'react';
+import { useState, useRef, useEffect, VideoHTMLAttributes, memo } from 'react';
 import { cn } from '@/lib/utils';
 import { isSlowConnection, prefersReducedMotion } from '@/utils/performanceOptimizer';
-import { isStreamUrl } from '@/utils/streamUpload';
-
-// Lazy load StreamPlayer to reduce initial bundle size (~154KB savings)
-const StreamPlayer = lazy(() => import('./StreamPlayer').then(mod => ({ default: mod.StreamPlayer })));
+import { getMediaUrl } from '@/config/media';
 
 interface LazyVideoProps extends VideoHTMLAttributes<HTMLVideoElement> {
   src: string;
@@ -16,7 +13,7 @@ interface LazyVideoProps extends VideoHTMLAttributes<HTMLVideoElement> {
 /**
  * High-performance lazy video component
  * - Lazy loads video only when in viewport
- * - Auto-detects Cloudflare Stream URLs and uses HLS player
+ * - Supports R2 videos (MP4, WebM, etc.)
  * - Preload="none" to save bandwidth
  * - Respects reduced motion preference
  * - Slow connection handling
@@ -41,21 +38,11 @@ export const LazyVideo = memo(({
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Check if this is a Cloudflare Stream video
-  const isStream = isStreamUrl(src);
+  // Build video URL from key or use full URL directly
+  const videoUrl = getMediaUrl(src);
   
-  // Auto-generate poster from Cloudflare Stream URL
-  const generateStreamPoster = (videoUrl: string): string | undefined => {
-    // Extract UID from iframe.videodelivery.net/{uid}
-    const match = videoUrl.match(/iframe\.videodelivery\.net\/([a-f0-9]+)/i);
-    if (match) {
-      return `https://videodelivery.net/${match[1]}/thumbnails/thumbnail.jpg?time=1s`;
-    }
-    return undefined;
-  };
-  
-  // Use provided poster or auto-generate from stream URL
-  const effectivePoster = poster || (isStream ? generateStreamPoster(src) : undefined);
+  // Use provided poster or undefined
+  const effectivePoster = poster ? getMediaUrl(poster) : undefined;
 
   // Detect slow connection or reduced motion
   const slowConnection = isSlowConnection();
@@ -101,16 +88,6 @@ export const LazyVideo = memo(({
     onError?.(e);
   };
 
-  const handleStreamError = () => {
-    setHasError(true);
-    setShowPlaceholder(false);
-  };
-
-  const handleStreamReady = () => {
-    setIsLoaded(true);
-    setShowPlaceholder(false);
-  };
-
   // Hide completely if error and hideOnError is true
   if (hasError && hideOnError) {
     return null;
@@ -149,43 +126,24 @@ export const LazyVideo = memo(({
 
       {/* Video element */}
       {isInView && (
-        isStream ? (
-          <Suspense fallback={<div className="w-full h-full bg-muted animate-pulse" />}>
-            <StreamPlayer
-              src={src}
-              poster={effectivePoster}
-              className={cn(
-                'w-full h-full transition-opacity duration-300',
-                isLoaded ? 'opacity-100' : 'opacity-0'
-              )}
-              autoPlay={autoPlay && !reducedMotion}
-              muted={muted}
-              loop={loop}
-              controls={showControls}
-              onError={handleStreamError}
-              onReady={handleStreamReady}
-            />
-          </Suspense>
-        ) : (
-          <video
-            ref={videoRef}
-            src={src}
-            poster={effectivePoster}
-            controls={showControls}
-            muted={muted}
-            loop={loop}
-            playsInline
-            preload="none"
-            onLoadedData={handleLoadedData}
-            onCanPlay={handleCanPlay}
-            onError={handleError}
-            className={cn(
-              'w-full h-full object-cover transition-opacity duration-300',
-              isLoaded ? 'opacity-100' : 'opacity-0'
-            )}
-            {...props}
-          />
-        )
+        <video
+          ref={videoRef}
+          src={videoUrl}
+          poster={effectivePoster}
+          controls={showControls}
+          muted={muted}
+          loop={loop}
+          playsInline
+          preload="none"
+          onLoadedData={handleLoadedData}
+          onCanPlay={handleCanPlay}
+          onError={handleError}
+          className={cn(
+            'w-full h-full object-cover transition-opacity duration-300',
+            isLoaded ? 'opacity-100' : 'opacity-0'
+          )}
+          {...props}
+        />
       )}
     </div>
   );

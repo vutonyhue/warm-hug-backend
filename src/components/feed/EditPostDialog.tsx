@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { uploadToR2, deleteFromR2 } from '@/utils/r2Upload';
 import { getMediaUrl } from '@/config/media';
-import { deleteStreamVideoByUid, extractStreamUid } from '@/utils/streamHelpers';
+import { deleteVideoByUrl, isStreamUrl, extractStreamUid } from '@/utils/streamHelpers';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -52,7 +52,7 @@ export const EditPostDialog = ({ post, isOpen, onClose, onPostUpdated, currentUs
   
   // Uppy video upload state
   const [pendingVideoFile, setPendingVideoFile] = useState<File | null>(null);
-  const [uppyVideoResult, setUppyVideoResult] = useState<{ uid: string; url: string; thumbnailUrl: string } | null>(null);
+  const [uppyVideoResult, setUppyVideoResult] = useState<{ key: string; url: string; thumbnailUrl: string } | null>(null);
   const [isVideoUploading, setIsVideoUploading] = useState(false);
 
   // Reset state when post changes
@@ -136,9 +136,9 @@ export const EditPostDialog = ({ post, isOpen, onClose, onPostUpdated, currentUs
   };
 
   const removeVideo = () => {
-    // If we have an Uppy video result, delete it from Stream
-    if (uppyVideoResult?.uid) {
-      deleteStreamVideoByUid(uppyVideoResult.uid);
+    // If we have an Uppy video result, delete it from R2
+    if (uppyVideoResult?.key) {
+      deleteVideoByUrl(uppyVideoResult.url);
     }
     setPendingVideoFile(null);
     setUppyVideoResult(null);
@@ -206,15 +206,12 @@ export const EditPostDialog = ({ post, isOpen, onClose, onPostUpdated, currentUs
       if (uppyVideoResult) {
         videoUrl = uppyVideoResult.url;
         
-        // Delete old video from Stream if it was a Stream URL
-        if (post.video_url) {
-          const oldUid = extractStreamUid(post.video_url);
-          if (oldUid && oldUid !== uppyVideoResult.uid) {
-            try {
-              await deleteStreamVideoByUid(oldUid);
-            } catch (error) {
-              console.error('Error deleting old video from Stream:', error);
-            }
+        // Delete old video from R2 if changed
+        if (post.video_url && post.video_url !== uppyVideoResult.url) {
+          try {
+            await deleteVideoByUrl(post.video_url);
+          } catch (error) {
+            console.error('Error deleting old video:', error);
           }
         }
       }
