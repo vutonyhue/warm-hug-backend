@@ -2,13 +2,17 @@ import { useRef, useEffect, useState } from 'react';
 import { useMessages } from '../hooks/useMessages';
 import { useTypingIndicator } from '../hooks/useTypingIndicator';
 import { useConversation } from '../hooks/useConversations';
+import { useVideoCall } from '../hooks/useVideoCall';
 import { MessageBubble } from './MessageBubble';
 import { ChatInput } from './ChatInput';
 import { TypingIndicator } from './TypingIndicator';
-import { useChatUser, useChatQueryClient } from './ChatProvider';
+import { CallButton } from './CallButton';
+import { VideoCallModal } from './VideoCallModal';
+import { IncomingCallDialog } from './IncomingCallDialog';
+import { useChatUser, useChatQueryClient, useChatConfig, useChatSupabase } from './ChatProvider';
 import { Search, Settings, Users, Loader2 } from 'lucide-react';
 import { cn } from '../utils/cn';
-import type { Message, ConversationParticipant } from '../types';
+import type { Message, ConversationParticipant, UserProfile } from '../types';
 
 interface MessageThreadProps {
   conversationId: string;
@@ -31,8 +35,11 @@ export function MessageThread({
 }: MessageThreadProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const queryClient = useChatQueryClient();
+  const config = useChatConfig();
+  const supabase = useChatSupabase();
   const { userId, username } = useChatUser();
   const [replyTo, setReplyTo] = useState<Message | null>(null);
+  const [callerProfile, setCallerProfile] = useState<UserProfile | null>(null);
 
   const { data: conversation } = useConversation(conversationId);
   const {
@@ -46,6 +53,25 @@ export function MessageThread({
 
   const { typingUsers, sendTyping } = useTypingIndicator(conversationId);
 
+  // Video call hook
+  const {
+    activeCall,
+    incomingCall,
+    agoraToken,
+    agoraUid,
+    agoraAppId,
+    startCall,
+    acceptCall,
+    rejectCall,
+    endCall,
+    cancelCall,
+    isStartingCall,
+    isJoiningCall,
+  } = useVideoCall({ conversationId });
+
+  // Check if video calls are enabled
+  const isCallEnabled = Boolean(config.agoraAppId) || Boolean(config.getAgoraToken) || Boolean(agoraAppId);
+
   // Get other participant for header
   const otherParticipant = conversation?.participants?.find(
     (p: ConversationParticipant) => p.user_id !== userId && !p.left_at
@@ -54,12 +80,41 @@ export function MessageThread({
   const isGroup = conversation?.type === 'group';
   const participantCount = conversation?.participants?.filter((p: ConversationParticipant) => !p.left_at).length || 0;
   
+  // Get participant IDs for calls
+  const participantIds = conversation?.participants
+    ?.filter((p: ConversationParticipant) => p.user_id !== userId && !p.left_at)
+    .map((p: ConversationParticipant) => p.user_id) || [];
+
   const headerName = isGroup
     ? conversation?.name
     : headerProfile?.username || 'User';
   const headerAvatar = isGroup
     ? conversation?.avatar_url
     : headerProfile?.avatar_url;
+
+  // Fetch caller profile for incoming calls
+  useEffect(() => {
+    if (incomingCall?.caller_id) {
+      supabase
+        .from('profiles')
+        .select('id, username, avatar_url, full_name')
+        .eq('id', incomingCall.caller_id)
+        .single()
+        .then(({ data }) => {
+          if (data) setCallerProfile(data as UserProfile);
+        });
+    } else if (activeCall && participantIds.length > 0) {
+      // For outgoing calls, show the other participant
+      supabase
+        .from('profiles')
+        .select('id, username, avatar_url, full_name')
+        .eq('id', participantIds[0])
+        .single()
+        .then(({ data }) => {
+          if (data) setCallerProfile(data as UserProfile);
+        });
+    }
+  }, [incomingCall?.caller_id, activeCall?.id, participantIds, supabase]);
 
   // Scroll to bottom on new messages
   useEffect(() => {
@@ -95,6 +150,43 @@ export function MessageThread({
       removeReaction.mutate({ messageId, emoji });
     } else {
       addReaction.mutate({ messageId, emoji });
+    }
+  };
+
+  // Video call handlers
+  const handleStartVideoCall = async () => {
+    if (participantIds.length > 0) {
+      await startCall.mutateAsync({ callType: 'video', participantIds });
+    }
+  };
+
+  const handleStartAudioCall = async () => {
+    if (participantIds.length > 0) {
+      await startCall.mutateAsync({ callType: 'audio', participantIds });
+    }
+  };
+
+  const handleAcceptCall = async () => {
+    if (incomingCall) {
+      await acceptCall.mutateAsync({ callId: incomingCall.id });
+    }
+  };
+
+  const handleRejectCall = async () => {
+    if (incomingCall) {
+      await rejectCall.mutateAsync({ callId: incomingCall.id });
+      setCallerProfile(null);
+    }
+  };
+
+  const handleEndCall = async () => {
+    if (activeCall) {
+      if (activeCall.status === 'ringing') {
+        await cancelCall.mutateAsync(activeCall.id);
+      } else {
+        await endCall.mutateAsync(activeCall.id);
+      }
+      setCallerProfile(null);
     }
   };
 
@@ -138,6 +230,24 @@ export function MessageThread({
         </div>
 
         <div className="flex items-center gap-1">
+          {/* Call buttons - only show if enabled and not in a group (for now) */}
+          {isCallEnabled && !isGroup && participantIds.length > 0 && (
+            <>
+              <CallButton
+                callType="audio"
+                onClick={handleStartAudioCall}
+                disabled={Boolean(activeCall)}
+                isLoading={isStartingCall && startCall.variables?.callType === 'audio'}
+              />
+              <CallButton
+                callType="video"
+                onClick={handleStartVideoCall}
+                disabled={Boolean(activeCall)}
+                isLoading={isStartingCall && startCall.variables?.callType === 'video'}
+              />
+            </>
+          )}
+          
           {onSearchClick && (
             <button 
               className="p-2 hover:bg-accent rounded-full"
@@ -192,6 +302,30 @@ export function MessageThread({
         onCancelReply={() => setReplyTo(null)}
         isSending={sendMessage.isPending}
       />
+
+      {/* Incoming call dialog */}
+      {incomingCall && !activeCall && (
+        <IncomingCallDialog
+          call={incomingCall}
+          callerProfile={callerProfile}
+          onAccept={handleAcceptCall}
+          onReject={handleRejectCall}
+          isAccepting={isJoiningCall}
+        />
+      )}
+
+      {/* Active call modal */}
+      {activeCall && agoraToken && agoraUid && (agoraAppId || config.agoraAppId) && (
+        <VideoCallModal
+          call={activeCall}
+          agoraAppId={agoraAppId || config.agoraAppId!}
+          agoraToken={agoraToken}
+          agoraUid={agoraUid}
+          callerProfile={callerProfile}
+          onEndCall={handleEndCall}
+          isOutgoing={activeCall.caller_id === userId}
+        />
+      )}
     </div>
   );
 }

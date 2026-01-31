@@ -19,6 +19,12 @@ export interface ChatConfig {
   translations?: Partial<ChatTranslations>;
   /** Optional custom date locale */
   dateLocale?: Locale;
+  /** Agora App ID - required for video calls */
+  agoraAppId?: string;
+  /** Function to get Agora token from backend */
+  getAgoraToken?: (channelName: string, uid: number) => Promise<string>;
+  /** Enable video call feature (default: true if agoraAppId is set) */
+  enableVideoCalls?: boolean;
 }
 
 /**
@@ -146,3 +152,32 @@ export interface TypingUser {
 // Re-export Locale type for convenience
 import type { Locale } from 'date-fns';
 export type { Locale };
+
+/**
+ * Video call data structure
+ */
+export interface VideoCall {
+  id: string;
+  conversation_id: string;
+  caller_id: string;
+  call_type: 'video' | 'audio';
+  status: 'pending' | 'ringing' | 'active' | 'ended' | 'missed' | 'rejected';
+  channel_name: string;
+  started_at: string | null;
+  ended_at: string | null;
+  duration_seconds: number | null;
+  created_at: string | null;
+}
+
+/**
+ * Video call participant data
+ */
+export interface VideoCallParticipant {
+  id: string;
+  call_id: string;
+  user_id: string;
+  joined_at: string | null;
+  left_at: string | null;
+  status: 'pending' | 'joined' | 'left' | 'rejected';
+  created_at: string | null;
+}
