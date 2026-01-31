@@ -78,12 +78,47 @@ export const StreamPlayer = memo(({
   const [useIframeFallback, setUseIframeFallback] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [checkAttempts, setCheckAttempts] = useState(0);
+  const [ensurePublicAttempted, setEnsurePublicAttempted] = useState(false);
+  const [iframeKey, setIframeKey] = useState(0);
   const statusCheckRef = useRef<NodeJS.Timeout | null>(null);
 
   const { type, url, uid } = parseVideoSource(src);
   
   // Generate thumbnail URL from UID
   const thumbnailUrl = uid ? `https://videodelivery.net/${uid}/thumbnails/thumbnail.jpg?time=1s` : poster;
+
+  // Try to ensure video is public (self-healing for permission errors)
+  const tryEnsurePublic = useCallback(async () => {
+    if (!uid || ensurePublicAttempted) return;
+    
+    console.log('[StreamPlayer] Attempting to ensure video is public:', uid);
+    setEnsurePublicAttempted(true);
+    
+    try {
+      const { data, error } = await supabase.functions.invoke('stream-video', {
+        body: { action: 'ensure-public', uid }
+      });
+      
+      if (error) {
+        console.warn('[StreamPlayer] ensure-public error:', error);
+        return false;
+      }
+      
+      if (data?.success) {
+        console.log('[StreamPlayer] Video set to public, reloading iframe...');
+        // Wait 2 seconds for Cloudflare to propagate, then reload
+        await new Promise(r => setTimeout(r, 2000));
+        setIframeKey(prev => prev + 1);
+        setHasError(false);
+        setIsProcessing(false);
+        return true;
+      }
+    } catch (err) {
+      console.error('[StreamPlayer] ensure-public exception:', err);
+    }
+    
+    return false;
+  }, [uid, ensurePublicAttempted]);
 
   // Check video status when there's an error or processing state
   const checkVideoStatus = useCallback(async () => {
@@ -97,6 +132,10 @@ export const StreamPlayer = memo(({
       
       if (error) {
         console.warn('[StreamPlayer] Status check error:', error);
+        // If status check fails, try ensure-public as fallback
+        if (!ensurePublicAttempted) {
+          await tryEnsurePublic();
+        }
         return;
       }
       
@@ -107,9 +146,8 @@ export const StreamPlayer = memo(({
         setIsProcessing(false);
         setHasError(false);
         setCheckAttempts(0);
-        // Force re-render by toggling fallback
-        setUseIframeFallback(false);
-        setTimeout(() => setUseIframeFallback(true), 100);
+        // Force re-render by incrementing iframe key
+        setIframeKey(prev => prev + 1);
       } else if (data?.status?.state === 'error') {
         console.error('[StreamPlayer] Video processing failed:', data.status);
         setIsProcessing(false);
@@ -122,7 +160,7 @@ export const StreamPlayer = memo(({
     } catch (err) {
       console.error('[StreamPlayer] Status check exception:', err);
     }
-  }, [uid]);
+  }, [uid, ensurePublicAttempted, tryEnsurePublic]);
 
   // Auto-check video status when error or processing
   useEffect(() => {
@@ -182,6 +220,7 @@ export const StreamPlayer = memo(({
     return (
       <div className={cn('relative bg-black aspect-video', className)}>
         <iframe
+          key={iframeKey}
           src={`${iframeUrl}?${autoPlay ? 'autoplay=true&' : ''}${muted ? 'muted=true&' : ''}${loop ? 'loop=true&' : ''}controls=${controls ? 'true' : 'false'}&preload=auto&poster=${encodeURIComponent(thumbnailUrl || '')}`}
           className="w-full h-full"
           allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture"
@@ -191,8 +230,16 @@ export const StreamPlayer = memo(({
             setIsProcessing(false);
             onReady?.();
           }}
-          onError={() => {
-            // Video might be processing, show processing state instead of error
+          onError={async () => {
+            console.log('[StreamPlayer] Iframe error, attempting recovery...');
+            // Try ensure-public first before showing error
+            if (!ensurePublicAttempted && uid) {
+              const recovered = await tryEnsurePublic();
+              if (recovered) {
+                return; // Will reload iframe automatically
+              }
+            }
+            // If recovery failed, show processing state
             setIsProcessing(true);
             setHasError(true);
           }}

@@ -170,33 +170,60 @@ async function uploadDirect(
         }
       });
 
-      xhr.addEventListener('load', () => {
+      xhr.addEventListener('load', async () => {
         if (xhr.status >= 200 && xhr.status < 300) {
           console.log('[streamUpload] Direct upload complete, uid:', uid);
           
           // Update video settings with retry logic
-          (async () => {
-            for (let attempt = 1; attempt <= 3; attempt++) {
-              try {
-                const { error } = await supabase.functions.invoke('stream-video', {
-                  body: { 
-                    action: 'update-video-settings',
-                    uid,
-                    requireSignedURLs: false,
-                    allowedOrigins: ['*'],
-                  }
-                });
-                if (!error) {
-                  console.log('[streamUpload] Video settings updated successfully');
-                  break;
+          let settingsUpdated = false;
+          for (let attempt = 1; attempt <= 3; attempt++) {
+            try {
+              const { error } = await supabase.functions.invoke('stream-video', {
+                body: { 
+                  action: 'update-video-settings',
+                  uid,
+                  requireSignedURLs: false,
+                  allowedOrigins: ['*'],
                 }
-                console.warn(`[streamUpload] Settings update attempt ${attempt} failed:`, error);
-              } catch (err) {
-                console.warn(`[streamUpload] Settings update attempt ${attempt} error:`, err);
+              });
+              if (!error) {
+                console.log('[streamUpload] Video settings updated successfully');
+                settingsUpdated = true;
+                break;
               }
-              if (attempt < 3) await new Promise(r => setTimeout(r, 1000));
+              console.warn(`[streamUpload] Settings update attempt ${attempt} failed:`, error);
+            } catch (err) {
+              console.warn(`[streamUpload] Settings update attempt ${attempt} error:`, err);
             }
-          })();
+            if (attempt < 3) await new Promise(r => setTimeout(r, 1000));
+          }
+          
+          // Verification step
+          if (settingsUpdated) {
+            await new Promise(r => setTimeout(r, 500));
+            try {
+              const { data: statusData } = await supabase.functions.invoke('stream-video', {
+                body: { action: 'check-status', uid }
+              });
+              if (statusData?.requireSignedURLs !== false) {
+                console.warn('[streamUpload] Settings verification failed, calling ensure-public...');
+                await supabase.functions.invoke('stream-video', {
+                  body: { action: 'ensure-public', uid }
+                });
+              }
+            } catch (verifyErr) {
+              console.warn('[streamUpload] Settings verification error:', verifyErr);
+            }
+          } else {
+            // Fallback to ensure-public
+            try {
+              await supabase.functions.invoke('stream-video', {
+                body: { action: 'ensure-public', uid }
+              });
+            } catch (ensureErr) {
+              console.error('[streamUpload] ensure-public failed:', ensureErr);
+            }
+          }
           
           resolve({
             uid,
@@ -289,32 +316,59 @@ export async function uploadToStreamTus(
             eta: Math.round(eta),
           });
         },
-        onSuccess: () => {
+        onSuccess: async () => {
           console.log('[streamUpload] TUS upload complete, uid:', uid);
           
           // Update video settings with retry logic
-          (async () => {
-            for (let attempt = 1; attempt <= 3; attempt++) {
-              try {
-                const { error } = await supabase.functions.invoke('stream-video', {
-                  body: { 
-                    action: 'update-video-settings',
-                    uid,
-                    requireSignedURLs: false,
-                    allowedOrigins: ['*'],
-                  }
-                });
-                if (!error) {
-                  console.log('[streamUpload] Video settings updated successfully');
-                  break;
+          let settingsUpdated = false;
+          for (let attempt = 1; attempt <= 3; attempt++) {
+            try {
+              const { error } = await supabase.functions.invoke('stream-video', {
+                body: { 
+                  action: 'update-video-settings',
+                  uid,
+                  requireSignedURLs: false,
+                  allowedOrigins: ['*'],
                 }
-                console.warn(`[streamUpload] Settings update attempt ${attempt} failed:`, error);
-              } catch (err) {
-                console.warn(`[streamUpload] Settings update attempt ${attempt} error:`, err);
+              });
+              if (!error) {
+                console.log('[streamUpload] Video settings updated successfully');
+                settingsUpdated = true;
+                break;
               }
-              if (attempt < 3) await new Promise(r => setTimeout(r, 1000));
+              console.warn(`[streamUpload] Settings update attempt ${attempt} failed:`, error);
+            } catch (err) {
+              console.warn(`[streamUpload] Settings update attempt ${attempt} error:`, err);
             }
-          })();
+            if (attempt < 3) await new Promise(r => setTimeout(r, 1000));
+          }
+          
+          // Verification step
+          if (settingsUpdated) {
+            await new Promise(r => setTimeout(r, 500));
+            try {
+              const { data: statusData } = await supabase.functions.invoke('stream-video', {
+                body: { action: 'check-status', uid }
+              });
+              if (statusData?.requireSignedURLs !== false) {
+                console.warn('[streamUpload] Settings verification failed, calling ensure-public...');
+                await supabase.functions.invoke('stream-video', {
+                  body: { action: 'ensure-public', uid }
+                });
+              }
+            } catch (verifyErr) {
+              console.warn('[streamUpload] Settings verification error:', verifyErr);
+            }
+          } else {
+            // Fallback to ensure-public
+            try {
+              await supabase.functions.invoke('stream-video', {
+                body: { action: 'ensure-public', uid }
+              });
+            } catch (ensureErr) {
+              console.error('[streamUpload] ensure-public failed:', ensureErr);
+            }
+          }
           
           resolve({
             uid,
