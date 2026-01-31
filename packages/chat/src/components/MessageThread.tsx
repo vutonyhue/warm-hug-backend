@@ -160,13 +160,22 @@ export function MessageThread({
   // Video call handlers
   const handleStartVideoCall = async () => {
     if (participantIds.length > 0) {
-      await startCall.mutateAsync({ callType: 'video', participantIds });
+      try {
+        await startCall.mutateAsync({ callType: 'video', participantIds });
+      } catch (error) {
+        console.error('[MessageThread] Video call failed:', error);
+        // Error is logged; UI feedback via loading state change
+      }
     }
   };
 
   const handleStartAudioCall = async () => {
     if (participantIds.length > 0) {
-      await startCall.mutateAsync({ callType: 'audio', participantIds });
+      try {
+        await startCall.mutateAsync({ callType: 'audio', participantIds });
+      } catch (error) {
+        console.error('[MessageThread] Audio call failed:', error);
+      }
     }
   };
 

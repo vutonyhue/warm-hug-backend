@@ -95,36 +95,50 @@ export function useVideoCall({ conversationId }: UseVideoCallOptions) {
 
   // Fetch Agora token
   const fetchAgoraToken = useCallback(async (channelName: string) => {
-    if (!config.getAgoraToken) {
-      // Use default edge function
-      const { data: session } = await supabase.auth.getSession();
-      if (!session?.session?.access_token) throw new Error('Not authenticated');
-
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL || ''}/functions/v1/agora-token`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${session.session.access_token}`,
-          },
-          body: JSON.stringify({ channelName }),
-        }
-      );
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Failed to get Agora token');
-      }
-
-      const data = await response.json();
-      return { token: data.token, uid: data.uid, appId: data.appId };
+    if (config.getAgoraToken) {
+      // Use custom function from config
+      const uid = Math.floor(Math.random() * 100000);
+      const token = await config.getAgoraToken(channelName, uid);
+      return { token, uid, appId: config.agoraAppId };
     }
 
-    // Use custom function from config
-    const uid = Math.floor(Math.random() * 100000);
-    const token = await config.getAgoraToken(channelName, uid);
-    return { token, uid, appId: config.agoraAppId };
+    // Use default edge function
+    const { data: session } = await supabase.auth.getSession();
+    if (!session?.session?.access_token) throw new Error('Not authenticated');
+
+    // Get URL from supabase client instead of env
+    const supabaseUrl = 
+      (supabase as any).supabaseUrl || 
+      (supabase as any).restUrl?.replace('/rest/v1', '') ||
+      import.meta.env.VITE_SUPABASE_URL ||
+      '';
+    
+    if (!supabaseUrl) {
+      throw new Error('Supabase URL not configured');
+    }
+
+    console.log('[useVideoCall] Fetching Agora token from:', `${supabaseUrl}/functions/v1/agora-token`);
+
+    const response = await fetch(
+      `${supabaseUrl}/functions/v1/agora-token`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.session.access_token}`,
+        },
+        body: JSON.stringify({ channelName }),
+      }
+    );
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.error || `Failed to get Agora token: ${response.status}`);
+    }
+
+    const data = await response.json();
+    console.log('[useVideoCall] Got Agora token successfully, appId:', data.appId);
+    return { token: data.token, uid: data.uid, appId: data.appId };
   }, [config, supabase]);
 
   // Start a call
@@ -133,6 +147,8 @@ export function useVideoCall({ conversationId }: UseVideoCallOptions) {
       if (!userId) throw new Error('Not authenticated');
       
       const channelName = `call_${conversationId}_${Date.now()}`;
+      
+      console.log('[useVideoCall] Starting call:', { callType, channelName, participantIds });
       
       // Create call record
       const { data: call, error } = await supabase
@@ -147,7 +163,12 @@ export function useVideoCall({ conversationId }: UseVideoCallOptions) {
         .select()
         .single();
 
-      if (error) throw error;
+      if (error) {
+        console.error('[useVideoCall] Failed to create call record:', error);
+        throw error;
+      }
+
+      console.log('[useVideoCall] Call record created:', call.id);
 
       // Add participants (including caller)
       const allParticipants = [...new Set([userId, ...participantIds])];
@@ -162,22 +183,41 @@ export function useVideoCall({ conversationId }: UseVideoCallOptions) {
           }))
         );
 
-      if (participantError) throw participantError;
+      if (participantError) {
+        console.error('[useVideoCall] Failed to add participants:', participantError);
+        throw participantError;
+      }
 
-      // Get Agora token
-      const tokenData = await fetchAgoraToken(channelName);
-      setAgoraToken(tokenData.token);
-      setAgoraUid(tokenData.uid);
-      if (tokenData.appId) setAgoraAppId(tokenData.appId);
-      setActiveCall(call);
+      // Get Agora token - with rollback on failure
+      try {
+        const tokenData = await fetchAgoraToken(channelName);
+        setAgoraToken(tokenData.token);
+        setAgoraUid(tokenData.uid);
+        if (tokenData.appId) setAgoraAppId(tokenData.appId);
+        setActiveCall(call);
 
-      // Update call status to ringing
-      await supabase
-        .from('video_calls')
-        .update({ status: 'ringing' })
-        .eq('id', call.id);
+        // Update call status to ringing
+        await supabase
+          .from('video_calls')
+          .update({ status: 'ringing' })
+          .eq('id', call.id);
 
-      return { call, ...tokenData };
+        console.log('[useVideoCall] Call started successfully');
+        return { call, ...tokenData };
+      } catch (tokenError) {
+        console.error('[useVideoCall] Failed to get Agora token, rolling back:', tokenError);
+        
+        // Rollback: mark call as missed
+        await supabase
+          .from('video_calls')
+          .update({ 
+            status: 'missed',
+            ended_at: new Date().toISOString(),
+          })
+          .eq('id', call.id);
+        
+        throw tokenError;
+      }
     },
   });
 
