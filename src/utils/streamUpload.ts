@@ -198,9 +198,9 @@ async function uploadDirect(
             if (attempt < 3) await new Promise(r => setTimeout(r, 1000));
           }
           
-          // Verification step
+          // Verification step - wait 1.5s for Cloudflare propagation
           if (settingsUpdated) {
-            await new Promise(r => setTimeout(r, 500));
+            await new Promise(r => setTimeout(r, 1500));
             try {
               const { data: statusData } = await supabase.functions.invoke('stream-video', {
                 body: { action: 'check-status', uid }
@@ -343,9 +343,9 @@ export async function uploadToStreamTus(
             if (attempt < 3) await new Promise(r => setTimeout(r, 1000));
           }
           
-          // Verification step
+          // Verification step - wait 1.5s for Cloudflare propagation
           if (settingsUpdated) {
-            await new Promise(r => setTimeout(r, 500));
+            await new Promise(r => setTimeout(r, 1500));
             try {
               const { data: statusData } = await supabase.functions.invoke('stream-video', {
                 body: { action: 'check-status', uid }

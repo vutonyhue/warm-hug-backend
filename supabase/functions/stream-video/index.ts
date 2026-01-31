@@ -363,6 +363,9 @@ Deno.serve(async (req: Request) => {
           thumbnail: video.thumbnail,
           playback: video.playback,
           preview: video.preview,
+          // Include access settings for frontend verification
+          requireSignedURLs: video.requireSignedURLs,
+          allowedOrigins: video.allowedOrigins,
         }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });

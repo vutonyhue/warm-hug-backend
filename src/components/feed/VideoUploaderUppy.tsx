@@ -601,8 +601,8 @@ export const VideoUploaderUppy = ({
             
             // Verification step: Wait for Cloudflare to propagate, then verify settings
             if (settingsUpdated) {
-              console.log('[VideoUploader] Waiting for Cloudflare to propagate settings...');
-              await new Promise(r => setTimeout(r, 500));
+              console.log('[VideoUploader] Waiting 1.5s for Cloudflare to propagate settings...');
+              await new Promise(r => setTimeout(r, 1500));
               
               try {
                 const { data: statusData } = await supabase.functions.invoke('stream-video', {
