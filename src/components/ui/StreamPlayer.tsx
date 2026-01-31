@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState, memo } from 'react';
+import { useEffect, useRef, useState, memo, useCallback } from 'react';
 import Hls from 'hls.js';
 import { cn } from '@/lib/utils';
-import { Play, Pause, Volume2, VolumeX, Maximize, Loader2, AlertCircle } from 'lucide-react';
+import { Play, Pause, Volume2, VolumeX, Maximize, Loader2, AlertCircle, RefreshCw } from 'lucide-react';
+import { supabase } from '@/integrations/supabase/client';
 
 interface StreamPlayerProps {
   src: string; // HLS manifest URL, Stream UID, or iframe embed URL
@@ -76,11 +77,77 @@ export const StreamPlayer = memo(({
   const [showControls, setShowControls] = useState(false);
   const [useIframeFallback, setUseIframeFallback] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [checkAttempts, setCheckAttempts] = useState(0);
+  const statusCheckRef = useRef<NodeJS.Timeout | null>(null);
 
   const { type, url, uid } = parseVideoSource(src);
   
   // Generate thumbnail URL from UID
   const thumbnailUrl = uid ? `https://videodelivery.net/${uid}/thumbnails/thumbnail.jpg?time=1s` : poster;
+
+  // Check video status when there's an error or processing state
+  const checkVideoStatus = useCallback(async () => {
+    if (!uid) return;
+    
+    try {
+      console.log('[StreamPlayer] Checking video status for uid:', uid);
+      const { data, error } = await supabase.functions.invoke('stream-video', {
+        body: { action: 'check-status', uid }
+      });
+      
+      if (error) {
+        console.warn('[StreamPlayer] Status check error:', error);
+        return;
+      }
+      
+      console.log('[StreamPlayer] Video status:', data);
+      
+      if (data?.readyToStream) {
+        console.log('[StreamPlayer] Video is ready, clearing error state');
+        setIsProcessing(false);
+        setHasError(false);
+        setCheckAttempts(0);
+        // Force re-render by toggling fallback
+        setUseIframeFallback(false);
+        setTimeout(() => setUseIframeFallback(true), 100);
+      } else if (data?.status?.state === 'error') {
+        console.error('[StreamPlayer] Video processing failed:', data.status);
+        setIsProcessing(false);
+        setHasError(true);
+      } else {
+        // Still processing, schedule another check
+        setIsProcessing(true);
+        setCheckAttempts(prev => prev + 1);
+      }
+    } catch (err) {
+      console.error('[StreamPlayer] Status check exception:', err);
+    }
+  }, [uid]);
+
+  // Auto-check video status when error or processing
+  useEffect(() => {
+    // Only check if we have a UID and there's an error or processing state
+    if (!uid || (!hasError && !isProcessing)) {
+      return;
+    }
+    
+    // Limit check attempts to avoid infinite loops (max 24 checks = ~2 minutes)
+    if (checkAttempts >= 24) {
+      console.log('[StreamPlayer] Max check attempts reached');
+      return;
+    }
+    
+    // Schedule status check every 5 seconds
+    statusCheckRef.current = setTimeout(() => {
+      checkVideoStatus();
+    }, 5000);
+    
+    return () => {
+      if (statusCheckRef.current) {
+        clearTimeout(statusCheckRef.current);
+      }
+    };
+  }, [uid, hasError, isProcessing, checkAttempts, checkVideoStatus]);
 
   // For iframe embeds, use iframe directly
   if (type === 'iframe' || useIframeFallback) {

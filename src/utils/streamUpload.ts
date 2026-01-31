@@ -174,17 +174,29 @@ async function uploadDirect(
         if (xhr.status >= 200 && xhr.status < 300) {
           console.log('[streamUpload] Direct upload complete, uid:', uid);
           
-          // Update video settings
-          supabase.functions.invoke('stream-video', {
-            body: { 
-              action: 'update-video-settings',
-              uid,
-              requireSignedURLs: false,
-              allowedOrigins: ['*'],
+          // Update video settings with retry logic
+          (async () => {
+            for (let attempt = 1; attempt <= 3; attempt++) {
+              try {
+                const { error } = await supabase.functions.invoke('stream-video', {
+                  body: { 
+                    action: 'update-video-settings',
+                    uid,
+                    requireSignedURLs: false,
+                    allowedOrigins: ['*'],
+                  }
+                });
+                if (!error) {
+                  console.log('[streamUpload] Video settings updated successfully');
+                  break;
+                }
+                console.warn(`[streamUpload] Settings update attempt ${attempt} failed:`, error);
+              } catch (err) {
+                console.warn(`[streamUpload] Settings update attempt ${attempt} error:`, err);
+              }
+              if (attempt < 3) await new Promise(r => setTimeout(r, 1000));
             }
-          }).catch((err) => {
-            console.warn('[streamUpload] Failed to update video settings:', err);
-          });
+          })();
           
           resolve({
             uid,
@@ -280,17 +292,29 @@ export async function uploadToStreamTus(
         onSuccess: () => {
           console.log('[streamUpload] TUS upload complete, uid:', uid);
           
-          // Update video settings
-          supabase.functions.invoke('stream-video', {
-            body: { 
-              action: 'update-video-settings',
-              uid,
-              requireSignedURLs: false,
-              allowedOrigins: ['*'],
+          // Update video settings with retry logic
+          (async () => {
+            for (let attempt = 1; attempt <= 3; attempt++) {
+              try {
+                const { error } = await supabase.functions.invoke('stream-video', {
+                  body: { 
+                    action: 'update-video-settings',
+                    uid,
+                    requireSignedURLs: false,
+                    allowedOrigins: ['*'],
+                  }
+                });
+                if (!error) {
+                  console.log('[streamUpload] Video settings updated successfully');
+                  break;
+                }
+                console.warn(`[streamUpload] Settings update attempt ${attempt} failed:`, error);
+              } catch (err) {
+                console.warn(`[streamUpload] Settings update attempt ${attempt} error:`, err);
+              }
+              if (attempt < 3) await new Promise(r => setTimeout(r, 1000));
             }
-          }).catch((err) => {
-            console.warn('[streamUpload] Failed to update video settings:', err);
-          });
+          })();
           
           resolve({
             uid,

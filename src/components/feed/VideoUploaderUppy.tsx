@@ -560,7 +560,7 @@ export const VideoUploaderUppy = ({
 
             setDebugTimeline(prev => ({
               ...prev,
-              lastStep: 'upload complete, processing',
+              lastStep: 'upload complete, updating settings',
             }));
 
             setUploadState(prev => ({
@@ -569,19 +569,39 @@ export const VideoUploaderUppy = ({
               progress: 100,
             }));
 
-            // Update video settings to make it public
-            try {
-              await supabase.functions.invoke('stream-video', {
-                body: {
-                  action: 'update-video-settings',
-                  uid,
-                  requireSignedURLs: false,
-                  allowedOrigins: ['*'],
-                },
-              });
-              console.log('[VideoUploader] Video settings updated');
-            } catch (err) {
-              console.warn('[VideoUploader] Failed to update settings:', err);
+            // Update video settings with retry logic to ensure video is public
+            let settingsUpdated = false;
+            for (let attempt = 1; attempt <= 3; attempt++) {
+              try {
+                console.log(`[VideoUploader] Updating video settings (attempt ${attempt}/3)...`);
+                const { error } = await supabase.functions.invoke('stream-video', {
+                  body: {
+                    action: 'update-video-settings',
+                    uid,
+                    requireSignedURLs: false,
+                    allowedOrigins: ['*'],
+                  },
+                });
+                
+                if (!error) {
+                  console.log('[VideoUploader] Video settings updated successfully');
+                  settingsUpdated = true;
+                  break;
+                }
+                console.warn(`[VideoUploader] Settings update attempt ${attempt} failed:`, error);
+              } catch (err) {
+                console.warn(`[VideoUploader] Settings update attempt ${attempt} error:`, err);
+              }
+              
+              // Wait 1 second before retry
+              if (attempt < 3) {
+                await new Promise(r => setTimeout(r, 1000));
+              }
+            }
+            
+            if (!settingsUpdated) {
+              console.error('[VideoUploader] Failed to update video settings after 3 attempts');
+              toast.warning('Video đã tải lên nhưng có thể cần thời gian để hiển thị');
             }
 
             // Success!
