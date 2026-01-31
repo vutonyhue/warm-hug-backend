@@ -1438,6 +1438,91 @@ export type Database = {
         }
         Relationships: []
       }
+      video_call_participants: {
+        Row: {
+          call_id: string | null
+          created_at: string | null
+          id: string
+          joined_at: string | null
+          left_at: string | null
+          status: string | null
+          user_id: string
+        }
+        Insert: {
+          call_id?: string | null
+          created_at?: string | null
+          id?: string
+          joined_at?: string | null
+          left_at?: string | null
+          status?: string | null
+          user_id: string
+        }
+        Update: {
+          call_id?: string | null
+          created_at?: string | null
+          id?: string
+          joined_at?: string | null
+          left_at?: string | null
+          status?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "video_call_participants_call_id_fkey"
+            columns: ["call_id"]
+            isOneToOne: false
+            referencedRelation: "video_calls"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      video_calls: {
+        Row: {
+          call_type: string
+          caller_id: string
+          channel_name: string
+          conversation_id: string | null
+          created_at: string | null
+          duration_seconds: number | null
+          ended_at: string | null
+          id: string
+          started_at: string | null
+          status: string
+        }
+        Insert: {
+          call_type?: string
+          caller_id: string
+          channel_name: string
+          conversation_id?: string | null
+          created_at?: string | null
+          duration_seconds?: number | null
+          ended_at?: string | null
+          id?: string
+          started_at?: string | null
+          status?: string
+        }
+        Update: {
+          call_type?: string
+          caller_id?: string
+          channel_name?: string
+          conversation_id?: string | null
+          created_at?: string | null
+          duration_seconds?: number | null
+          ended_at?: string | null
+          id?: string
+          started_at?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "video_calls_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       oauth_clients_public: {

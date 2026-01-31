@@ -89,6 +89,8 @@ export default function Chat() {
     currentUsername: username,
     uploadMedia: uploadChatMedia,
     dateLocale: vi,
+    // Enable video calls - token will be fetched from edge function automatically
+    enableVideoCalls: true,
   }), [userId, username, queryClient, uploadChatMedia]);
 
   // Chờ auth hoàn tất

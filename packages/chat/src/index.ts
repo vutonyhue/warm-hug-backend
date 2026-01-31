@@ -26,6 +26,12 @@ export { VoiceRecordButton } from './components/VoiceRecordButton';
 export { VoicePreview } from './components/VoicePreview';
 export { VoicePlayer } from './components/VoicePlayer';
 
+// Video Call Components
+export { VideoCallModal } from './components/VideoCallModal';
+export { IncomingCallDialog } from './components/IncomingCallDialog';
+export { CallButton } from './components/CallButton';
+export { VideoCallProvider, useVideoCallContext } from './components/VideoCallProvider';
+
 // Hooks
 export { useChatNotifications } from './hooks/useChatNotifications';
 export { useChatSettings, canSendMessage } from './hooks/useChatSettings';
@@ -35,6 +41,8 @@ export { useMessages } from './hooks/useMessages';
 export { useTypingIndicator } from './hooks/useTypingIndicator';
 export { useDebounce } from './hooks/useDebounce';
 export { useVoiceRecorder, formatVoiceDuration } from './hooks/useVoiceRecorder';
+export { useVideoCall } from './hooks/useVideoCall';
+export { useAgoraClient } from './hooks/useAgoraClient';
 
 // Utils
 export { cn } from './utils/cn';
@@ -52,4 +60,6 @@ export type {
   TypingUser,
   UserProfile,
   Locale,
+  VideoCall,
+  VideoCallParticipant,
 } from './types';

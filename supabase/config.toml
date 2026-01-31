@@ -2,3 +2,6 @@ project_id = "xxsgapdiiuuajihsmjzt"
 
 [functions.api-feed]
 verify_jwt = false
+
+[functions.agora-token]
+verify_jwt = false
