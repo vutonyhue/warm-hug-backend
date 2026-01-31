@@ -70,7 +70,11 @@ export function MessageThread({
   } = useVideoCall({ conversationId });
 
   // Check if video calls are enabled
-  const isCallEnabled = Boolean(config.agoraAppId) || Boolean(config.getAgoraToken) || Boolean(agoraAppId);
+  const isCallEnabled = 
+    config.enableVideoCalls || 
+    Boolean(config.agoraAppId) || 
+    Boolean(config.getAgoraToken) || 
+    Boolean(agoraAppId);
 
   // Get other participant for header
   const otherParticipant = conversation?.participants?.find(
