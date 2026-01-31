@@ -225,6 +225,33 @@ Deno.serve(async (req: Request) => {
           fileId: fileId || 'not-provided',
         });
 
+        // Pre-set video as public immediately after getting UID
+        // This ensures video will be publicly accessible once upload completes
+        try {
+          console.log('[stream-video] Pre-setting video as public:', streamMediaId);
+          const settingsResponse = await fetch(
+            `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/stream/${streamMediaId}`,
+            {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${CLOUDFLARE_STREAM_API_TOKEN}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                requireSignedURLs: false,
+                allowedOrigins: ['*'],
+              }),
+            }
+          );
+          console.log('[stream-video] Pre-set video public, status:', settingsResponse.status);
+          if (!settingsResponse.ok) {
+            const errText = await settingsResponse.text();
+            console.warn('[stream-video] Pre-set failed:', truncateErrorText(errText, 200));
+          }
+        } catch (err) {
+          console.warn('[stream-video] Pre-set failed, will retry after upload:', err);
+        }
+
         return new Response(JSON.stringify({
           uploadUrl,
           uid: streamMediaId,
@@ -480,6 +507,74 @@ Deno.serve(async (req: Request) => {
           requireSignedURLs: data.result?.requireSignedURLs,
           allowedOrigins: data.result?.allowedOrigins,
         }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      // ============================================
+      // ENSURE VIDEO IS PUBLIC (with retry logic)
+      // ============================================
+      case 'ensure-public': {
+        const { uid } = body;
+        if (!uid) {
+          return new Response(
+            JSON.stringify({ error: 'Missing video UID' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+
+        console.log('[stream-video] Ensuring video is public:', uid);
+
+        // Retry up to 3 times with 1 second delay
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          try {
+            const response = await fetch(
+              `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/stream/${uid}`,
+              {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${CLOUDFLARE_STREAM_API_TOKEN}`,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  requireSignedURLs: false,
+                  allowedOrigins: ['*'],
+                }),
+              }
+            );
+
+            if (response.ok) {
+              const data = await response.json();
+              console.log('[stream-video] Video set to public successfully:', uid, 'attempt:', attempt);
+              return new Response(JSON.stringify({
+                success: true,
+                uid,
+                requireSignedURLs: data.result?.requireSignedURLs,
+                allowedOrigins: data.result?.allowedOrigins,
+              }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+              });
+            }
+
+            const errorText = await response.text();
+            console.warn(`[stream-video] ensure-public attempt ${attempt} failed:`, truncateErrorText(errorText, 200));
+          } catch (err) {
+            console.warn(`[stream-video] ensure-public attempt ${attempt} error:`, err);
+          }
+
+          // Wait 1 second before retry
+          if (attempt < 3) {
+            await new Promise(r => setTimeout(r, 1000));
+          }
+        }
+
+        // All attempts failed
+        console.error('[stream-video] Failed to ensure video is public after 3 attempts:', uid);
+        return new Response(JSON.stringify({
+          error: 'Failed to set video public after 3 attempts',
+          uid,
+        }), {
+          status: 502,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }

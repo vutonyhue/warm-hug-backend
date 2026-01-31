@@ -599,9 +599,40 @@ export const VideoUploaderUppy = ({
               }
             }
             
-            if (!settingsUpdated) {
-              console.error('[VideoUploader] Failed to update video settings after 3 attempts');
-              toast.warning('Video đã tải lên nhưng có thể cần thời gian để hiển thị');
+            // Verification step: Wait for Cloudflare to propagate, then verify settings
+            if (settingsUpdated) {
+              console.log('[VideoUploader] Waiting for Cloudflare to propagate settings...');
+              await new Promise(r => setTimeout(r, 500));
+              
+              try {
+                const { data: statusData } = await supabase.functions.invoke('stream-video', {
+                  body: { action: 'check-status', uid }
+                });
+                
+                // If requireSignedURLs is still true, call ensure-public as fallback
+                if (statusData?.requireSignedURLs !== false) {
+                  console.warn('[VideoUploader] Settings verification failed, calling ensure-public...');
+                  await supabase.functions.invoke('stream-video', {
+                    body: { action: 'ensure-public', uid }
+                  });
+                } else {
+                  console.log('[VideoUploader] Settings verified: video is public');
+                }
+              } catch (verifyErr) {
+                console.warn('[VideoUploader] Settings verification error:', verifyErr);
+              }
+            } else {
+              // Settings update failed, try ensure-public as last resort
+              console.error('[VideoUploader] Failed to update video settings, trying ensure-public...');
+              try {
+                await supabase.functions.invoke('stream-video', {
+                  body: { action: 'ensure-public', uid }
+                });
+                console.log('[VideoUploader] ensure-public called as fallback');
+              } catch (ensureErr) {
+                console.error('[VideoUploader] ensure-public failed:', ensureErr);
+                toast.warning('Video đã tải lên nhưng có thể cần thời gian để hiển thị');
+              }
             }
 
             // Success!
