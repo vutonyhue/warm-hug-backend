@@ -1,189 +1,221 @@
 
-# Kế hoạch: Sửa lỗi "You don't have permission to view this video"
+# Kế hoạch: Đảm bảo tất cả video được Stream xử lý và xem công khai
 
-## Nguyên nhân gốc
+## Tóm tắt hiện trạng
 
-Sau khi phân tích code và logs, tôi đã xác định **3 vấn đề chính**:
+Hệ thống hiện tại đã có các thành phần cần thiết:
+1. **Edge Function `stream-video`**: Xử lý upload, check status, update settings
+2. **VideoUploaderUppy**: Upload video qua TUS protocol với retry logic cho settings
+3. **StreamPlayer**: Player hỗ trợ iframe embed, HLS, và auto-polling status
+4. **LazyVideo**: Auto-detect Stream URLs và render StreamPlayer
 
-### 1. Race Condition trong Video Settings Update
-Trong file `src/components/feed/VideoUploaderUppy.tsx` (dòng 573-585), việc update video settings được gọi như sau:
-```typescript
-try {
-  await supabase.functions.invoke('stream-video', {
-    body: {
-      action: 'update-video-settings',
-      uid,
-      requireSignedURLs: false,
-      allowedOrigins: ['*'],
-    },
-  });
-  console.log('[VideoUploader] Video settings updated');
-} catch (err) {
-  console.warn('[VideoUploader] Failed to update settings:', err);
-}
-```
-Vấn đề: Dù có `await`, nhưng nếu call bị fail, hàm `onUploadComplete()` vẫn được gọi ngay sau đó và post được tạo với video không có quyền public.
+### Vấn đề còn tồn tại
 
-### 2. Video chưa Ready khi hiển thị
-Cloudflare Stream cần thời gian để encode và processing video. Khi post được tạo ngay lập tức sau upload, video có thể chưa `readyToStream`.
+Sau khi phân tích code, tôi nhận thấy **3 điểm yếu** có thể gây lỗi "permission":
 
-### 3. Không chờ đợi Settings Update hoàn thành
-Trong `streamUpload.ts` (dòng 176-187 và 283-293), việc update settings được gọi qua `.catch()`:
-```typescript
-supabase.functions.invoke('stream-video', {
-  body: { 
-    action: 'update-video-settings',
-    uid,
-    requireSignedURLs: false,
-    allowedOrigins: ['*'],
-  }
-}).catch((err) => {
-  console.warn('[streamUpload] Failed to update video settings:', err);
-});
-```
-Điều này có nghĩa là code **không chờ đợi** kết quả và tiếp tục ngay lập tức.
+1. **TUS Upload không set `requireSignedURLs: false` ngay từ đầu**
+   - Trong `get-tus-upload-url` (dòng 164-168), metadata chỉ có `requiresignedurls false` nhưng đây là **TUS metadata**, không phải Cloudflare Stream settings
+   - Video được tạo với settings mặc định của Cloudflare (có thể là private)
+   - Phải chờ upload xong mới gọi `update-video-settings`
+
+2. **Direct Upload đã set đúng** (dòng 252-260):
+   ```javascript
+   requireSignedURLs: false,
+   allowedOrigins: ['*'],
+   ```
+   Nhưng TUS upload không có cơ chế tương tự khi tạo URL.
+
+3. **Race condition trong retry logic**
+   - Code hiện tại có retry 3 lần cho `update-video-settings`
+   - Nhưng nếu cả 3 lần đều fail, video vẫn được tạo với quyền private
 
 ---
 
-## Giải pháp đề xuất
+## Giải pháp
 
-### A) Sửa Video Settings Update trong VideoUploaderUppy.tsx (ưu tiên cao)
-- **Đảm bảo await thành công** trước khi call `onUploadComplete()`
-- Nếu update settings thất bại, thử lại tối đa 3 lần
-- Chỉ hoàn thành upload khi settings đã được cập nhật
+### A) Backend: Cải thiện Edge Function `stream-video`
+
+**Thay đổi 1**: Trong action `get-tus-upload-url`, sau khi tạo upload URL thành công, **tự động gọi update settings** ngay lập tức (vì lúc này đã có UID).
 
 ```typescript
-// Trong onSuccess callback (dòng 572-610)
-onSuccess: async () => {
-  console.log('[VideoUploader] Upload complete! UID:', uid);
+// Sau khi lấy được uploadUrl và streamMediaId
+// Ngay lập tức update settings để video public
+try {
+  const settingsResponse = await fetch(
+    `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/stream/${streamMediaId}`,
+    {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${CLOUDFLARE_STREAM_API_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        requireSignedURLs: false,
+        allowedOrigins: ['*'],
+      }),
+    }
+  );
+  console.log('[stream-video] Pre-set video public, status:', settingsResponse.status);
+} catch (err) {
+  console.warn('[stream-video] Pre-set failed, will retry after upload:', err);
+}
+```
 
-  // Update video settings với retry logic
-  let settingsUpdated = false;
+**Lý do**: Ngay khi video UID được tạo (trước khi upload bắt đầu), ta có thể set settings. Cloudflare cho phép update settings của video đang chờ upload.
+
+**Thay đổi 2**: Thêm action `ensure-public` - một shortcut để đảm bảo video public:
+
+```typescript
+case 'ensure-public': {
+  const { uid } = body;
+  // Retry 3 lần với delay
   for (let attempt = 1; attempt <= 3; attempt++) {
-    try {
-      const { error } = await supabase.functions.invoke('stream-video', {
-        body: {
-          action: 'update-video-settings',
-          uid,
+    const response = await fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/stream/${uid}`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${CLOUDFLARE_STREAM_API_TOKEN}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
           requireSignedURLs: false,
           allowedOrigins: ['*'],
-        },
-      });
-      
-      if (!error) {
-        console.log('[VideoUploader] Video settings updated successfully');
-        settingsUpdated = true;
-        break;
+        }),
       }
-      console.warn(`[VideoUploader] Settings update attempt ${attempt} failed:`, error);
-    } catch (err) {
-      console.warn(`[VideoUploader] Settings update attempt ${attempt} error:`, err);
+    );
+    if (response.ok) {
+      return Response(JSON.stringify({ success: true, uid }));
     }
-    
-    // Wait before retry
-    if (attempt < 3) {
-      await new Promise(r => setTimeout(r, 1000));
-    }
+    await new Promise(r => setTimeout(r, 1000));
   }
-  
-  if (!settingsUpdated) {
-    console.error('[VideoUploader] Failed to update video settings after 3 attempts');
-    toast.warning('Video đã tải lên nhưng có thể cần thời gian để hiển thị');
-  }
-
-  // Continue with success flow...
-}
-```
-
-### B) Cải thiện StreamPlayer để xử lý video chưa ready
-Trong `src/components/ui/StreamPlayer.tsx`:
-- Thêm logic kiểm tra video status trước khi render iframe
-- Nếu video chưa ready, hiển thị thông báo "Đang xử lý video"
-- Tự động retry sau mỗi vài giây
-
-```typescript
-// Thêm useEffect để check video status
-useEffect(() => {
-  if (!uid) return;
-  
-  const checkVideoReady = async () => {
-    try {
-      const { data } = await supabase.functions.invoke('stream-video', {
-        body: { action: 'check-status', uid }
-      });
-      
-      if (data?.readyToStream) {
-        setIsProcessing(false);
-        setHasError(false);
-      } else {
-        setIsProcessing(true);
-        // Retry after 5 seconds
-        setTimeout(checkVideoReady, 5000);
-      }
-    } catch (err) {
-      console.error('[StreamPlayer] Status check error:', err);
-    }
-  };
-  
-  checkVideoReady();
-}, [uid]);
-```
-
-### C) Sửa streamUpload.ts để đợi settings update
-Trong `src/utils/streamUpload.ts` (dòng 176-187 và 283-293):
-- Thay đổi từ fire-and-forget thành await với error handling
-
-```typescript
-// Thay thế code hiện tại
-try {
-  await supabase.functions.invoke('stream-video', {
-    body: { 
-      action: 'update-video-settings',
-      uid,
-      requireSignedURLs: false,
-      allowedOrigins: ['*'],
-    }
-  });
-  console.log('[streamUpload] Video settings updated');
-} catch (err) {
-  console.warn('[streamUpload] Failed to update video settings:', err);
-  // Non-blocking - video should still work, just might have permission issues
+  return Response(JSON.stringify({ error: 'Failed after 3 attempts' }));
 }
 ```
 
 ---
 
-## Tóm tắt thay đổi
+### B) Frontend: Cải thiện VideoUploaderUppy.tsx
+
+**Thay đổi 1**: Sau khi TUS upload complete, thêm verification step:
+
+```typescript
+// Sau retry loop update-video-settings
+// Thêm verification để đảm bảo settings đã apply
+if (settingsUpdated) {
+  // Wait 500ms for Cloudflare to propagate
+  await new Promise(r => setTimeout(r, 500));
+  
+  // Verify settings actually applied
+  const { data: statusData } = await supabase.functions.invoke('stream-video', {
+    body: { action: 'check-status', uid }
+  });
+  
+  if (statusData?.requireSignedURLs !== false) {
+    console.warn('[VideoUploader] Settings verification failed, retrying...');
+    // One more attempt
+    await supabase.functions.invoke('stream-video', {
+      body: { action: 'ensure-public', uid }
+    });
+  }
+}
+```
+
+**Thay đổi 2**: Trong `streamUpload.ts`, đảm bảo cả direct upload và TUS đều có verification.
+
+---
+
+### C) Frontend: Cải thiện StreamPlayer.tsx
+
+**Thay đổi 1**: Khi phát hiện lỗi permission, tự động gọi `ensure-public`:
+
+```typescript
+// Trong onError của iframe
+onError={() => {
+  // Thử ensure-public trước khi hiển thị lỗi
+  if (uid && !retryEnsurePublic) {
+    setRetryEnsurePublic(true);
+    supabase.functions.invoke('stream-video', {
+      body: { action: 'ensure-public', uid }
+    }).then(() => {
+      // Reload iframe sau 2 giây
+      setTimeout(() => {
+        setIframeKey(prev => prev + 1);
+      }, 2000);
+    });
+  } else {
+    setIsProcessing(true);
+    setHasError(true);
+  }
+}}
+```
+
+---
+
+## Tóm tắt các file cần sửa
 
 | File | Thay đổi |
 |------|----------|
-| `src/components/feed/VideoUploaderUppy.tsx` | 1. Thêm retry logic cho update-video-settings (3 lần) |
-| | 2. Đảm bảo await hoàn thành trước khi gọi onUploadComplete |
-| | 3. Hiển thị warning nếu settings update thất bại |
-| `src/components/ui/StreamPlayer.tsx` | 1. Thêm logic check video readyToStream |
-| | 2. Hiển thị "Đang xử lý" nếu video chưa ready |
-| | 3. Auto-retry check status mỗi 5 giây |
-| `src/utils/streamUpload.ts` | 1. Thay fire-and-forget bằng await |
-| | 2. Log warning nếu thất bại (không throw error) |
+| `supabase/functions/stream-video/index.ts` | 1. Thêm auto-set public trong `get-tus-upload-url` |
+| | 2. Thêm action `ensure-public` với retry logic |
+| `src/components/feed/VideoUploaderUppy.tsx` | 1. Thêm verification step sau update settings |
+| | 2. Gọi `ensure-public` nếu verification fail |
+| `src/utils/streamUpload.ts` | 1. Thêm verification cho direct upload và TUS |
+| `src/components/ui/StreamPlayer.tsx` | 1. Auto-retry ensure-public khi gặp lỗi permission |
+| | 2. Reload iframe sau khi ensure-public thành công |
+
+---
+
+## Luồng hoạt động mới
+
+```
+1. User chọn video để upload
+   │
+2. Frontend gọi get-tus-upload-url
+   │
+3. Backend:
+   ├── Tạo upload URL + UID từ Cloudflare
+   └── Ngay lập tức gọi update settings (requireSignedURLs: false)
+   │
+4. Frontend upload video qua TUS
+   │
+5. Khi upload complete:
+   ├── Gọi update-video-settings (retry 3 lần)
+   ├── Wait 500ms
+   └── Verify settings đã apply
+   │
+6. Tạo post với video URL
+   │
+7. Khi hiển thị video (StreamPlayer):
+   ├── Nếu ready → play bình thường
+   ├── Nếu processing → hiển thị "Đang xử lý"
+   └── Nếu permission error → gọi ensure-public → reload
+```
 
 ---
 
 ## Kết quả mong đợi
 
-1. Video được upload và settings được cập nhật **trước khi** post được tạo
-2. Nếu video chưa sẵn sàng, người dùng thấy thông báo "Đang xử lý video" thay vì lỗi permission
-3. Video tự động hiển thị khi đã sẵn sàng (không cần refresh trang)
-4. Nếu settings update thất bại, người dùng được thông báo nhưng video vẫn được lưu
+1. **100% video công khai**: Mọi video upload đều có `requireSignedURLs: false`
+2. **Fallback tự động**: Nếu settings fail, StreamPlayer tự retry
+3. **Không lỗi permission**: Người xem bất kỳ đều có thể xem video
+4. **Backward compatible**: Video cũ bị lỗi sẽ tự sửa khi được xem
 
 ---
 
 ## Chi tiết kỹ thuật
 
-### Vì sao xảy ra lỗi "You don't have permission"?
-Cloudflare Stream mặc định có thể yêu cầu signed URLs hoặc giới hạn `allowedOrigins`. Khi upload qua Direct Creator Upload, video có thể được tạo với settings mặc định (private) và cần được update ngay sau đó.
+### Vì sao cần set public ngay khi tạo URL?
+- Cloudflare Stream mặc định có thể restrict video mới
+- Set public trước khi upload đảm bảo video ready = public ngay
+- Giảm race condition giữa upload complete và settings update
 
-### Vì sao không thấy trong logs?
-Edge function logs cho thấy `update-video-settings` được gọi và trả về status 200. Tuy nhiên, điều này không đảm bảo Cloudflare đã apply settings ngay lập tức. Có thể có độ trễ trong hệ thống Cloudflare.
+### Vì sao cần verification?
+- Cloudflare API trả về 200 nhưng có thể chưa propagate
+- Verification đảm bảo settings đã thực sự apply
+- Nếu fail, có cơ hội retry trước khi user thấy lỗi
 
-### Alternative: Sử dụng signed URLs
-Nếu vấn đề vẫn tiếp diễn, có thể chuyển sang sử dụng signed URLs cho video playback. Điều này đảm bảo video luôn có thể được truy cập thông qua token được tạo bởi backend.
+### Vì sao StreamPlayer cần auto-retry?
+- Video cũ có thể bị private do bug trước đây
+- Self-healing: khi user xem → auto-fix → refresh → xem được
+- Không cần admin can thiệp thủ công
