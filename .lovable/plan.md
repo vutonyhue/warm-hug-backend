@@ -1,194 +1,143 @@
 
+## Chẩn đoán nhanh (vì sao bấm gọi video vẫn “chưa được”)
 
-# Kế hoạch: Sửa lỗi Video Call không hoạt động
+Hiện tại nút gọi **có chạy** nhưng bị fail ngay ở bước “thêm người tham gia cuộc gọi” do **quy tắc quyền truy cập database (RLS)**.
 
-## Phân tích nguyên nhân
+Bằng chứng từ console/network:
+- Lỗi: `new row violates row-level security policy for table "video_call_participants"`
+- Request `POST .../video_call_participants` trả về **403**
 
-Sau khi debug, tôi đã xác định được các vấn đề:
+Nguyên nhân gốc:
+- Policy hiện tại của `video_call_participants` chỉ cho phép **INSERT khi `auth.uid() = user_id`**.
+- Nhưng khi tạo cuộc gọi, client đang **insert 2 dòng**: 1 dòng cho caller (đúng), 1 dòng cho callee (sai vì user_id != auth.uid()) → cả batch insert bị từ chối.
 
-### 1. URL Edge Function không đúng
-Trong `packages/chat/src/hooks/useVideoCall.ts`, dòng 104:
-```typescript
-const response = await fetch(
-  `${import.meta.env.VITE_SUPABASE_URL || ''}/functions/v1/agora-token`,
-  ...
+Về domain `media.fun.rich` trong console:
+- Đây là do `index.html` đang có `preconnect` và `preload` trỏ vào `https://media.fun.rich/...` nên browser vẫn cố tải resource từ domain cũ và log cảnh báo.
+
+---
+
+## Mục tiêu cần làm
+1) Cho phép **caller** tạo danh sách participants cho cuộc gọi (insert được row của người khác) nhưng vẫn an toàn: chỉ được thêm **những user thật sự thuộc conversation**.  
+2) UI hiển thị lỗi rõ ràng (toast) thay vì “bấm không được”.  
+3) Xóa hoàn toàn các tham chiếu runtime tới `media.fun.rich` (ít nhất ở `index.html`) để console không còn log domain cũ.  
+4) Đảm bảo mọi thay đổi nằm trong `packages/chat` (như cha dặn) + cập nhật phần app host (index.html) nếu cần.
+
+---
+
+## Các thay đổi dự kiến
+
+### A) Sửa quyền truy cập (RLS) cho `video_call_participants` (BẮT BUỘC)
+**Cần một database migration** để thay policy INSERT hiện tại bằng 2 policy rõ ràng:
+
+1. **Caller có quyền tạo participants** cho call mà họ vừa tạo  
+   Điều kiện:
+   - caller phải là người tạo call (`video_calls.caller_id = auth.uid()`)
+   - caller là participant của conversation
+   - user_id được thêm vào cũng phải là participant của conversation
+
+2. (Tùy chọn) Giữ policy cho phép user tự insert “row của chính mình” (an toàn, không ảnh hưởng)
+
+**SQL dự kiến (sẽ chạy qua tool migration):**
+```sql
+-- 1) Drop policy cũ gây lỗi
+DROP POLICY IF EXISTS "Users can join calls they are invited to"
+ON public.video_call_participants;
+
+-- 2) Cho phép caller thêm participants (bao gồm cả người khác)
+CREATE POLICY "Caller can add participants to their calls"
+ON public.video_call_participants
+FOR INSERT
+TO authenticated
+WITH CHECK (
+  EXISTS (
+    SELECT 1
+    FROM public.video_calls vc
+    WHERE vc.id = video_call_participants.call_id
+      AND vc.caller_id = auth.uid()
+      AND public.is_conversation_participant(vc.conversation_id, auth.uid())
+      AND public.is_conversation_participant(vc.conversation_id, video_call_participants.user_id)
+  )
 );
+
+-- 3) (Optional) user vẫn có thể insert row của chính mình nếu cần
+CREATE POLICY "Users can insert own participant row"
+ON public.video_call_participants
+FOR INSERT
+TO authenticated
+WITH CHECK (auth.uid() = user_id);
 ```
 
-**Vấn đề**: Khi package chat được sử dụng như một library, `import.meta.env.VITE_SUPABASE_URL` có thể trả về `undefined` hoặc empty string. Điều này khiến request được gửi đến sai URL.
-
-### 2. Không có error handling hiển thị cho người dùng
-Khi lấy token thất bại, cuộc gọi bị "treo" ở trạng thái `pending` mà người dùng không biết lỗi gì.
-
-### 3. Database records xác nhận issue
-Query database cho thấy nhiều cuộc gọi được tạo với status `pending` nhưng không bao giờ chuyển sang `ringing` vì bước lấy token thất bại.
+Kỳ vọng sau bước này:
+- `POST video_call_participants` sẽ trả 201 thay vì 403
+- Cuộc gọi chuyển sang `ringing` và UI call modal/Incoming dialog hoạt động bình thường
 
 ---
 
-## Giải pháp
+### B) Cập nhật `packages/chat` để UX rõ ràng + rollback sạch
+Hiện `startCall` nếu fail ở bước insert participants thì sẽ throw, nhưng **call record đã tạo** → có thể tạo nhiều call “pending” rác.
 
-### Thay đổi 1: Lấy Supabase URL từ client thay vì env
+Sẽ cập nhật trong `packages/chat/src/hooks/useVideoCall.ts`:
+1) Bọc đoạn insert participants trong `try/catch`.
+2) Nếu insert participants fail:
+   - update `video_calls` → `status = 'missed'`, set `ended_at`
+   - (tùy chọn) hiển thị toast lỗi
 
-**File**: `packages/chat/src/hooks/useVideoCall.ts`
+Sẽ cập nhật trong `packages/chat/src/components/MessageThread.tsx`:
+- Khi `handleStartVideoCall/handleStartAudioCall` catch error → `toast.error(...)` để user thấy “không tạo cuộc gọi được” (thay vì im lặng).
 
-Thay vì:
-```typescript
-const response = await fetch(
-  `${import.meta.env.VITE_SUPABASE_URL || ''}/functions/v1/agora-token`,
-  ...
-);
-```
-
-Đổi thành lấy URL từ supabase client:
-```typescript
-// Lấy URL từ supabase client
-const supabaseUrl = (supabase as any).supabaseUrl 
-  || (supabase as any).restUrl?.replace('/rest/v1', '') 
-  || import.meta.env.VITE_SUPABASE_URL;
-
-const response = await fetch(
-  `${supabaseUrl}/functions/v1/agora-token`,
-  ...
-);
-```
-
-### Thay đổi 2: Thêm error handling và toast thông báo
-
-Khi gọi video thất bại, hiển thị thông báo lỗi cho người dùng thay vì fail silently.
-
-### Thay đổi 3: Rollback cuộc gọi khi lấy token thất bại
-
-Nếu không lấy được Agora token, cập nhật cuộc gọi về trạng thái `missed` thay vì để ở `pending`.
+Lưu ý: package chat đã dùng `sonner` trong các chỗ khác nên dùng lại cùng pattern.
 
 ---
 
-## Chi tiết kỹ thuật
+### C) Xóa domain `media.fun.rich` khỏi runtime (để console sạch)
+Trong `index.html` hiện có:
+- `<link rel="preconnect" href="https://media.fun.rich" ...>`
+- `<link rel="preload" as="image" href="https://media.fun.rich/cdn-cgi/image/.../fun-profile-logo-40.webp" ...>`
 
-### File cần sửa
+Sẽ sửa:
+1) **Xóa** preconnect/dns-prefetch tới `media.fun.rich`
+2) Đổi preload LCP image sang **local asset** (đang có sẵn trong `public/`):
+   - `href="/fun-profile-logo-40.webp"`  
+   (hoặc nếu muốn preload bản tối ưu hóa qua domain mới thì chuyển sang domain mới; nhưng local là sạch nhất và đúng “logo standards” trong docs dự án)
 
-| File | Thay đổi |
-|------|----------|
-| `packages/chat/src/hooks/useVideoCall.ts` | Sửa logic lấy URL và thêm error handling |
-| `packages/chat/src/components/MessageThread.tsx` | Thêm toast notification khi gọi thất bại |
-
-### Thay đổi trong useVideoCall.ts
-
-```typescript
-// Fetch Agora token - CẬP NHẬT
-const fetchAgoraToken = useCallback(async (channelName: string) => {
-  if (config.getAgoraToken) {
-    // Use custom function from config
-    const uid = Math.floor(Math.random() * 100000);
-    const token = await config.getAgoraToken(channelName, uid);
-    return { token, uid, appId: config.agoraAppId };
-  }
-
-  // Use default edge function
-  const { data: session } = await supabase.auth.getSession();
-  if (!session?.session?.access_token) throw new Error('Not authenticated');
-
-  // Lấy URL từ supabase client thay vì env
-  const supabaseUrl = 
-    (supabase as any).supabaseUrl || 
-    (supabase as any).restUrl?.replace('/rest/v1', '') ||
-    import.meta.env.VITE_SUPABASE_URL ||
-    '';
-    
-  if (!supabaseUrl) {
-    throw new Error('Supabase URL not configured');
-  }
-
-  const response = await fetch(
-    `${supabaseUrl}/functions/v1/agora-token`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${session.session.access_token}`,
-      },
-      body: JSON.stringify({ channelName }),
-    }
-  );
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({}));
-    throw new Error(error.error || `Failed to get Agora token: ${response.status}`);
-  }
-
-  const data = await response.json();
-  return { token: data.token, uid: data.uid, appId: data.appId };
-}, [config, supabase]);
-
-// startCall mutation - THÊM ERROR HANDLING
-const startCall = useMutation({
-  mutationFn: async ({ callType, participantIds }: StartCallParams) => {
-    // ... existing code tạo record ...
-    
-    try {
-      const tokenData = await fetchAgoraToken(channelName);
-      // ... rest of success flow
-    } catch (tokenError) {
-      // Rollback: đánh dấu cuộc gọi là missed vì không kết nối được
-      await supabase
-        .from('video_calls')
-        .update({ 
-          status: 'missed',
-          ended_at: new Date().toISOString(),
-        })
-        .eq('id', call.id);
-      
-      throw tokenError; // Re-throw để mutation.onError bắt được
-    }
-  },
-  onError: (error) => {
-    console.error('[useVideoCall] Start call failed:', error);
-    // Error sẽ được propagate lên component để hiển thị toast
-  },
-});
-```
-
-### Thay đổi trong MessageThread.tsx
-
-```typescript
-// Video call handlers - THÊM ERROR HANDLING
-const handleStartVideoCall = async () => {
-  if (participantIds.length > 0) {
-    try {
-      await startCall.mutateAsync({ callType: 'video', participantIds });
-    } catch (error) {
-      console.error('[MessageThread] Video call failed:', error);
-      // Toast sẽ được hiển thị bởi ChatProvider hoặc local toast
-    }
-  }
-};
-```
+Kết quả: browser không còn request tới `media.fun.rich`, console hết cảnh báo liên quan domain cũ.
 
 ---
 
-## Kiểm tra sau khi sửa
-
-1. Mở console log khi bấm nút gọi video
-2. Xác nhận request được gửi đến đúng URL: `https://xxsgapdiiuuajihsmjzt.supabase.co/functions/v1/agora-token`
-3. Xác nhận Edge Function trả về token và appId
-4. Xác nhận VideoCallModal hiển thị
+## Trình tự triển khai
+1) **Chạy database migration** để sửa RLS policy của `video_call_participants` (đây là blocker chính).
+2) Update code trong **`packages/chat`**:
+   - `useVideoCall.ts`: rollback nếu insert participants fail + log/toast phù hợp
+   - `MessageThread.tsx`: toast khi gọi thất bại
+3) Update `index.html` để remove `media.fun.rich` và preload bằng local logo.
+4) Test end-to-end:
+   - User A mở chat direct → bấm Video
+   - Network phải thấy:
+     - `POST video_calls` = 201
+     - `POST video_call_participants` = 201 (không còn 403)
+     - Call status update → `ringing`
+     - `POST /functions/v1/agora-token` = 200
+   - User B nhận Incoming dialog và Accept → call vào modal, có audio/video track
 
 ---
 
-## Luồng hoạt động sau khi sửa
+## Các file/tầng sẽ đụng tới
+- Database migration (RLS policies) cho:
+  - `public.video_call_participants`
+- Code (package):
+  - `packages/chat/src/hooks/useVideoCall.ts`
+  - `packages/chat/src/components/MessageThread.tsx`
+- App host:
+  - `index.html` (xóa `media.fun.rich`)
 
-```
-1. User click nút Video Call
-2. Tạo record video_calls (status: pending)
-3. Lấy Supabase URL từ client
-4. Gọi Edge Function agora-token
-5. Nếu thành công:
-   ├── Set agoraToken, agoraUid, agoraAppId
-   ├── Set activeCall
-   ├── Update status -> ringing
-   └── Hiển thị VideoCallModal
-6. Nếu thất bại:
-   ├── Update status -> missed
-   ├── Hiển thị toast lỗi
-   └── Clear state
-```
+---
+
+## Rủi ro & lưu ý
+- Đây là thay đổi về quyền (security). Policy mới vẫn chặt vì:
+  - chỉ caller của call được thêm participants
+  - chỉ thêm user nằm trong conversation
+- Nếu sau khi sửa RLS vẫn không call được, bước tiếp theo sẽ là kiểm tra:
+  - trạng thái `video_calls` có update được sang `ringing/active` không
+  - backend function `agora-token` có trả token/appId ổn định không
+  - quyền camera/mic và HTTPS
 
