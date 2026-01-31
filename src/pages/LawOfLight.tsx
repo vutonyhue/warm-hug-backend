@@ -15,6 +15,7 @@ const LawOfLight = () => {
   const [checklist, setChecklist] = useState([false, false, false, false, false]);
   const [loading, setLoading] = useState(false);
   const [isReadOnly, setIsReadOnly] = useState(false);
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -22,18 +23,26 @@ const LawOfLight = () => {
     
     // Check if user is already logged in and has accepted
     const checkAuth = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('law_of_light_accepted')
-          .eq('id', session.user.id)
-          .single();
-        
-        // If user is logged in and already accepted, redirect to feed
-        if (profile?.law_of_light_accepted) {
-          navigate('/');
+      setIsCheckingAuth(true);
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('law_of_light_accepted')
+            .eq('id', session.user.id)
+            .single();
+          
+          // If user is logged in and already accepted, redirect to feed
+          if (profile?.law_of_light_accepted) {
+            navigate('/');
+            return; // Early return - no need to set isCheckingAuth
+          }
         }
+      } catch (error) {
+        console.error('Error checking auth:', error);
+      } finally {
+        setIsCheckingAuth(false);
       }
     };
     checkAuth();
@@ -56,10 +65,16 @@ const LawOfLight = () => {
       
       if (session) {
         // User already logged in - update profile directly
-        await supabase.from('profiles').update({
+        const { error } = await supabase.from('profiles').update({
           law_of_light_accepted: true,
           law_of_light_accepted_at: new Date().toISOString()
         }).eq('id', session.user.id);
+        
+        if (error) {
+          console.error('Error updating profile:', error);
+          toast.error('Có lỗi xảy ra, vui lòng thử lại');
+          return;
+        }
         
         toast.success('🌟 Con đã sẵn sàng bước vào Ánh Sáng!');
         navigate('/');
@@ -105,6 +120,26 @@ const LawOfLight = () => {
     heading: "'Cormorant Garamond', Georgia, serif",
     body: "'Lora', Georgia, serif",
   };
+
+  // Show loading screen while checking auth
+  if (isCheckingAuth) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{
+        background: 'linear-gradient(180deg, #FFFEF7 0%, #FFF9E6 30%, #FFF5D6 60%, #FFFDF5 100%)'
+      }}>
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-12 h-12 border-4 border-gold border-t-transparent rounded-full animate-spin" style={{
+            borderColor: '#D4AF37',
+            borderTopColor: 'transparent'
+          }} />
+          <p className="text-lg" style={{ 
+            fontFamily: "'Cormorant Garamond', Georgia, serif",
+            color: '#B8860B' 
+          }}>Đang kiểm tra...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen relative overflow-hidden">
@@ -647,7 +682,7 @@ const LawOfLight = () => {
               <div className="mt-10 text-center space-y-4">
                 <Button
                   onClick={handleAccept}
-                  disabled={!allChecked || loading}
+                  disabled={!allChecked || loading || isCheckingAuth}
                   className="relative px-12 py-6 text-lg font-bold rounded-2xl transition-all duration-500 disabled:opacity-50 disabled:cursor-not-allowed border-0"
                   style={{
                     fontFamily: fontStyles.heading,
