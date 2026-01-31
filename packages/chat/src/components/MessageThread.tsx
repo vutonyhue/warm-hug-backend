@@ -12,6 +12,7 @@ import { IncomingCallDialog } from './IncomingCallDialog';
 import { useChatUser, useChatQueryClient, useChatConfig, useChatSupabase } from './ChatProvider';
 import { Search, Settings, Users, Loader2 } from 'lucide-react';
 import { cn } from '../utils/cn';
+import { toast } from 'sonner';
 import type { Message, ConversationParticipant, UserProfile } from '../types';
 
 interface MessageThreadProps {
@@ -164,7 +165,7 @@ export function MessageThread({
         await startCall.mutateAsync({ callType: 'video', participantIds });
       } catch (error) {
         console.error('[MessageThread] Video call failed:', error);
-        // Error is logged; UI feedback via loading state change
+        toast.error('Không thể bắt đầu cuộc gọi video. Vui lòng thử lại.');
       }
     }
   };
@@ -175,6 +176,7 @@ export function MessageThread({
         await startCall.mutateAsync({ callType: 'audio', participantIds });
       } catch (error) {
         console.error('[MessageThread] Audio call failed:', error);
+        toast.error('Không thể bắt đầu cuộc gọi thoại. Vui lòng thử lại.');
       }
     }
   };

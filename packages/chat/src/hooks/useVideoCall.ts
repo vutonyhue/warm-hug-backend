@@ -170,21 +170,34 @@ export function useVideoCall({ conversationId }: UseVideoCallOptions) {
 
       console.log('[useVideoCall] Call record created:', call.id);
 
-      // Add participants (including caller)
+      // Add participants (including caller) - with rollback on failure
       const allParticipants = [...new Set([userId, ...participantIds])];
-      const { error: participantError } = await supabase
-        .from('video_call_participants')
-        .insert(
-          allParticipants.map(uid => ({
-            call_id: call.id,
-            user_id: uid,
-            status: uid === userId ? 'joined' : 'pending',
-            joined_at: uid === userId ? new Date().toISOString() : null,
-          }))
-        );
+      try {
+        const { error: participantError } = await supabase
+          .from('video_call_participants')
+          .insert(
+            allParticipants.map(uid => ({
+              call_id: call.id,
+              user_id: uid,
+              status: uid === userId ? 'joined' : 'pending',
+              joined_at: uid === userId ? new Date().toISOString() : null,
+            }))
+          );
 
-      if (participantError) {
-        console.error('[useVideoCall] Failed to add participants:', participantError);
+        if (participantError) {
+          console.error('[useVideoCall] Failed to add participants:', participantError);
+          throw participantError;
+        }
+      } catch (participantError) {
+        console.error('[useVideoCall] Failed to add participants, rolling back call:', participantError);
+        // Rollback: mark call as missed
+        await supabase
+          .from('video_calls')
+          .update({ 
+            status: 'missed',
+            ended_at: new Date().toISOString(),
+          })
+          .eq('id', call.id);
         throw participantError;
       }
 
