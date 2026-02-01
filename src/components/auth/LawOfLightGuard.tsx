@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -11,10 +11,11 @@ export const LawOfLightGuard = ({ children }: LawOfLightGuardProps) => {
   const location = useLocation();
   const [isChecking, setIsChecking] = useState(true);
   const [isAllowed, setIsAllowed] = useState(false);
+  const cachedSession = useRef<{ userId: string; accepted: boolean } | null>(null);
 
   useEffect(() => {
     const checkLawOfLightAcceptance = async () => {
-      // Skip check for public pages
+      // Skip check for public pages - instant allow
       const publicPaths = ['/law-of-light', '/docs'];
       const isPublicPath = publicPaths.some(path => location.pathname.startsWith(path));
       
@@ -28,28 +29,66 @@ export const LawOfLightGuard = ({ children }: LawOfLightGuardProps) => {
       if (location.pathname.startsWith('/auth')) {
         const pending = localStorage.getItem('law_of_light_accepted_pending');
         if (pending === 'true') {
-          // Already accepted Law of Light → allow access to /auth
           setIsAllowed(true);
           setIsChecking(false);
           return;
         }
-        // Not accepted yet → redirect to Law of Light
         navigate('/law-of-light', { replace: true });
         return;
       }
 
-      const { data: { session } } = await supabase.auth.getSession();
+      // Use cached result if available (prevents duplicate API calls)
+      if (cachedSession.current) {
+        if (cachedSession.current.accepted) {
+          setIsAllowed(true);
+          setIsChecking(false);
+          return;
+        }
+      }
+
+      // Try localStorage first for quick check (no network)
+      try {
+        const storedSession = localStorage.getItem(`sb-xxsgapdiiuuajihsmjzt-auth-token`);
+        if (!storedSession) {
+          // No session - allow guest access for feed, redirect others
+          if (location.pathname === '/' || location.pathname === '/feed') {
+            setIsAllowed(true);
+            setIsChecking(false);
+            return;
+          }
+          navigate('/law-of-light', { replace: true });
+          return;
+        }
+      } catch {
+        // Ignore localStorage errors
+      }
+
+      // Get session with timeout for faster response
+      const sessionPromise = supabase.auth.getSession();
+      const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000));
       
-      // Guest mode: Allow unauthenticated users to view feed
-      // They can browse but not interact (handled in components)
-      if (!session) {
-        // For root/feed path, allow guest access
+      const result = await Promise.race([sessionPromise, timeoutPromise]);
+      
+      // Handle timeout - allow guest access for feed
+      if (!result) {
         if (location.pathname === '/' || location.pathname === '/feed') {
           setIsAllowed(true);
           setIsChecking(false);
           return;
         }
-        // For other protected routes, redirect to law-of-light
+        navigate('/law-of-light', { replace: true });
+        return;
+      }
+
+      const session = result.data?.session;
+      
+      // Guest mode: Allow unauthenticated users to view feed
+      if (!session) {
+        if (location.pathname === '/' || location.pathname === '/feed') {
+          setIsAllowed(true);
+          setIsChecking(false);
+          return;
+        }
         navigate('/law-of-light', { replace: true });
         return;
       }
@@ -61,8 +100,13 @@ export const LawOfLightGuard = ({ children }: LawOfLightGuardProps) => {
         .eq('id', session.user.id)
         .single();
 
+      // Cache the result
+      cachedSession.current = {
+        userId: session.user.id,
+        accepted: profile?.law_of_light_accepted ?? false
+      };
+
       if (profile && !profile.law_of_light_accepted) {
-        // User hasn't accepted, redirect to Law of Light page
         navigate('/law-of-light', { replace: true });
         return;
       }
@@ -73,13 +117,15 @@ export const LawOfLightGuard = ({ children }: LawOfLightGuardProps) => {
 
     checkLawOfLightAcceptance();
 
-    // Also listen for auth state changes
+    // Listen for auth state changes - reset cache on sign in/out
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_IN' && session) {
-        // Check when user signs in
+        cachedSession.current = null; // Reset cache on new sign in
         setTimeout(() => {
           checkLawOfLightAcceptance();
         }, 0);
+      } else if (event === 'SIGNED_OUT') {
+        cachedSession.current = null;
       }
     });
 

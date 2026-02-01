@@ -1,5 +1,6 @@
 import { lazy, Suspense } from "react";
 import Feed from "./pages/Feed";
+import LawOfLight from "./pages/LawOfLight"; // Direct import for faster first load
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -19,7 +20,6 @@ const Leaderboard = lazy(() => import("./pages/Leaderboard"));
 const AdminMigration = lazy(() => import("./pages/AdminMigration"));
 const Admin = lazy(() => import("./pages/Admin"));
 const NotFound = lazy(() => import("./pages/NotFound"));
-const LawOfLight = lazy(() => import("./pages/LawOfLight"));
 const Notifications = lazy(() => import("./pages/Notifications"));
 const DocsRouter = lazy(() => import("./pages/DocsRouter"));
 const ConnectedApps = lazy(() => import("./pages/ConnectedApps"));
